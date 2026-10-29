@@ -1,6 +1,4 @@
-# chat_zalo – Chat 1–1 thời gian thực
-
-**Nhóm 10 người | 4 tuần | P0 – source khung, CHƯA triển khai nghiệp vụ.**
+# Chat_zalo – Chat 1–1 thời gian thực
 
 ## Stack đã chốt
 - **Frontend:** C#, Blazor WebAssembly .NET 10 (`frontend/Chat.Client.csproj`)
