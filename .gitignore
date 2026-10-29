@@ -1,0 +1,9 @@
+**/bin/
+**/obj/
+**/node_modules/
+**/.env
+**/.env.*
+!**/.env.example
+**/appsettings.Production.json
+.vs/
+.idea/

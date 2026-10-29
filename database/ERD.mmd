@@ -1,0 +1,56 @@
+erDiagram
+  Users ||--o{ Friendships : involved
+  Users ||--o{ UserBlocks : involved
+  Users ||--o{ Conversations : creates
+  Users ||--o{ ConversationMembers : joins
+  Users ||--o{ Messages : sends
+  Conversations ||--o| DirectConversations : direct
+  Conversations ||--o{ ConversationMembers : members
+  Conversations ||--o{ Messages : holds
+
+  Users {
+    uuid Id PK
+    string UserName
+    string NormalizedUserName UK
+    string Email
+    string NormalizedEmail UK
+    string DisplayName
+  }
+  Friendships {
+    uuid UserLowId PK,FK
+    uuid UserHighId PK,FK
+    uuid RequesterUserId FK
+    string Status
+  }
+  UserBlocks {
+    uuid BlockerUserId PK,FK
+    uuid BlockedUserId PK,FK
+  }
+  Conversations {
+    uuid Id PK
+    uuid CreatedByUserId FK
+    string Kind
+    bigint LastMessageSeq
+  }
+  DirectConversations {
+    uuid ConversationId PK,FK
+    uuid UserLowId FK
+    uuid UserHighId FK
+  }
+  ConversationMembers {
+    uuid ConversationId PK,FK
+    uuid UserId PK,FK
+    bigint LastDeliveredSeq
+    bigint LastReadSeq
+  }
+  Messages {
+    uuid Id PK
+    uuid ConversationId FK
+    uuid SenderUserId FK
+    uuid ClientMessageId
+    bigint Seq
+    string Body
+    timestamptz CreatedAt
+  }
+%% Other Identity tables: Roles, UserRoles, UserClaims, RoleClaims, UserLogins, UserTokens.
+%% Composite UK and CHECK constraints are documented in DATABASE_RULES.md; Mermaid cannot represent all FKs independently.
