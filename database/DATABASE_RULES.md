@@ -1,6 +1,6 @@
 # DATABASE RULES
 
-**Phiên bản:** 1.1  
+**Phiên bản:** 1. 
 **Phạm vi:** P0 – Chat cá nhân 1–1  
 **Áp dụng:** Toàn bộ nhóm phát triển chat_zalo
 
@@ -88,3 +88,46 @@ Các FK và CHECK phải được cấu hình trong EF Core, không chỉ ghi tr
 - Migrations chỉ một owner tại thời điểm làm; commit cùng code entity/config và review của leader; không có raw SQL schema chạy song song với Code First.
 - `ERD.mmd` là sơ đồ logic, chưa phải EF Migration; **chưa có triển khai `ChatDbContext`, entity và migration**, nhóm DB phải xây dựng theo tài liệu.
 - Local: `Database=chat_zalo`, `Username=chat_zalo`, `Password=dev_change_me` chỉ là thông tin demo trên máy dev; môi trường thật dùng secret từ biến môi trường, không commit mật khẩu thật.
+
+## 6. Quy định bổ sung cho Sprint 1 – v1.2
+
+### Identity
+
+- Sử dụng duy nhất `ApplicationUser : IdentityUser<Guid>`.
+- `ChatDbContext` kế thừa `IdentityDbContext<ApplicationUser, IdentityRole<Guid>, Guid>`.
+- Bảng tài khoản được map thành `Users`.
+- Không tạo Entity tài khoản thứ hai.
+- Tất cả khóa ngoại người dùng tham chiếu đúng Identity User.
+
+### Messages và Seq
+
+- `Seq` tăng riêng theo từng hội thoại.
+- Cấp Seq bằng transaction PostgreSQL và thao tác tăng nguyên tử `Conversations.LastMessageSeq`.
+- Không dùng `SELECT MAX(Seq)+1` không có khóa bảo vệ.
+- Tăng bộ đếm và lưu Messages trong cùng transaction.
+- Transaction thất bại phải rollback.
+
+### UNIQUE bắt buộc
+
+- `UNIQUE(ConversationId, Seq)`
+- `UNIQUE(ConversationId, SenderUserId, ClientMessageId)`
+- `UNIQUE(UserLowId, UserHighId)` trong DirectConversations.
+
+### Retry
+
+- Cùng ClientMessageId, cùng nội dung: không tạo bản ghi mới.
+- Cùng ClientMessageId, khác nội dung: trả HTTP 409.
+- Khi có tranh chấp UNIQUE, Backend phải xử lý retry an toàn.
+
+### Blocks
+
+- Chặn không xóa lịch sử đã lưu.
+- Quyền xem lịch sử áp dụng theo `docs/API_CONTRACT.md`.
+- Phân biệt kiểm tra chặn hai chiều và chặn một chiều.
+
+### Migration
+
+- CHAT-1 phụ trách Entity, DbContext và Migration.
+- CHAT-7 phụ trách transaction và nghiệp vụ Messages.
+- Không tự ý thay đổi Entity/DbContext chung.
+- Migration phải kiểm thử trên database thử nghiệm.
