@@ -1,5 +1,5 @@
 # FE CONTRACT – chat_zalo (Blazor WebAssembly)
-**Phiên bản:** 1.1 – áp dụng P0; source FE là khung, chưa có code nghiệp vụ.
+**Phiên bản:** 1.2 – áp dụng P0; source FE là khung.
 
 ## 1. Kiến trúc và quy ước
 - FE `frontend/Chat.Client.csproj` (.NET 10, Razor/C#); BE `backend/Chat.Api` (ASP.NET Core 10); DB PostgreSQL `chat_zalo`.
@@ -28,3 +28,40 @@
 - FE giải mã lỗi `code`/`message`, xử lý status `200/201/204/400/401/403/404/409` và không đoán theo message string.
 - Chat flow: POST message → Hub event → GET messages để đồng bộ; reconnect gọi lại GET bằng seq; đừng coi SignalR event là bản ghi tin nhắn.
 
+
+## 4. Quy định tích hợp Frontend theo API Contract v1.2
+
+### Authentication và CSRF
+
+- Frontend sử dụng Blazor WebAssembly .NET 10.
+- Sử dụng HttpClient với browser credentials `Include` khi FE và BE khác origin.
+- Gọi `GET /api/auth/csrf` để lấy CSRF token.
+- Gửi header `X-CSRF-TOKEN` cho POST, PUT, PATCH, DELETE.
+- Lấy lại token khi trạng thái đăng nhập thay đổi.
+- Không lưu mật khẩu, Cookie HTTP-only hoặc DB credentials trong Frontend.
+
+### Messages
+
+- `beforeSeq`: tải lịch sử tin nhắn cũ.
+- `afterSeq`: lấy tin nhắn mới.
+- Không truyền đồng thời hai tham số.
+- Lưu Seq cuối cùng đã đồng bộ cho từng hội thoại.
+- Xử lý tin nhắn trùng theo MessageId hoặc Seq.
+
+### SignalR
+
+- Kết nối Hub `/hubs/chat`.
+- Nhận event `ConversationChanged`.
+- Sau khi nhận event, gọi Messages API với `afterSeq`.
+- Khi reconnect, tải tiếp tin nhắn còn thiếu.
+- Không dùng SignalR làm nơi lưu dữ liệu.
+
+### Giao diện
+
+- Xây dựng Login, Register, Profile, UserSearch và Chat.
+- Sử dụng các Razor Components tái sử dụng.
+- Có trạng thái Loading, Empty, Error và Unauthorized.
+- Có thể dùng mock data đúng DTO để phát triển giao diện.
+- Phải phân biệt chức năng mock với chức năng đã tích hợp Backend thật.
+- Không sử dụng ReactJS, JSX hoặc Vite.
+- Không kết nối PostgreSQL trực tiếp từ Frontend.
