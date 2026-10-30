@@ -5,8 +5,10 @@ using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
-var connectionString = builder.Configuration.GetConnectionString("ChatDb")
-    ?? "Host=localhost;Port=5432;Database=chat_zalo;Username=chat_zalo;Password=dev_change_me";
+// Read local configuration or override with environment variables.
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
+    ?? builder.Configuration.GetConnectionString("ChatDb")
+    ?? throw new InvalidOperationException("Configure ConnectionStrings:ChatDb or ConnectionStrings:DefaultConnection.");
 
 builder.Services.AddDbContext<ChatDbContext>(options =>
     options.UseNpgsql(connectionString));
@@ -23,16 +25,15 @@ builder.Services.AddIdentityCore<ApplicationUser>(options =>
 
 builder.Services.AddControllers();
 
-// Swagger
+// OpenAPI chuẩn .NET 10
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+builder.Services.AddOpenApi();
 
 var app = builder.Build();
 
 if (app.Environment.IsDevelopment())
 {
-    app.UseSwagger();
-    app.UseSwaggerUI();
+    app.MapOpenApi();
 }
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));

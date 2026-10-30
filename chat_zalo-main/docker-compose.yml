@@ -1,0 +1,20 @@
+# PostgreSQL only; FE/API run locally via dotnet during development.
+# Values below are DEMO-ONLY. Use environment variables or secret storage outside local development.
+services:
+  db:
+    image: postgres:18
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-chat_zalo}
+      POSTGRES_USER: ${POSTGRES_USER:-chat_zalo}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dev_change_me}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+volumes:
+  pgdata:
