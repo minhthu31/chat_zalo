@@ -1,6 +1,6 @@
 # API CONTRACT – CHAT_ZALO
 
-**Phiên bản:** 1.1  
+**Phiên bản:** 1.2 
 **Phạm vi:** P0 – Chat cá nhân 1–1  
 **Áp dụng:** Toàn bộ thành viên dự án chat_zalo
 
@@ -64,6 +64,7 @@ Quy định:
 | POST | `/api/auth/login` | Đăng nhập |
 | POST | `/api/auth/logout` | Đăng xuất |
 | GET | `/api/auth/me` | Lấy tài khoản hiện tại |
+| GET | `/api/auth/csrf` | Cấp CSRF token |
 
 **RegisterRequest**
 
@@ -87,13 +88,33 @@ Quy định:
 **UserResponse** (dùng cho login và auth/me)
 
 ```json
+
 {
-  "id": "1234567890a",
+  "id": "550e8400-e29b-41d4-a716-446655440001",
   "username": "user01",
   "displayName": "Nguyen Van A"
 }
+
 ```
 
+**CSRF Contract**
+
+- `GET /api/auth/csrf` trả HTTP `200`:
+
+```json
+{
+  "token": "csrf-token-value"
+}
+```
+
+- Backend cấp và kiểm tra token bằng ASP.NET Core Antiforgery.
+- Frontend gửi header `X-CSRF-TOKEN` trên các request POST, PUT, PATCH, DELETE, bao gồm đăng ký, đăng nhập và đăng xuất.
+- Sau khi trạng thái đăng nhập thay đổi, Frontend lấy lại CSRF token.
+- Thiếu hoặc sai token trả HTTP `400` với code `INVALID_CSRF_TOKEN`.
+- API chưa xác thực trả `401`, không đủ quyền trả `403`.
+- API trả JSON, không chuyển hướng sang trang đăng nhập HTML.
+- Cookie xác thực sử dụng HttpOnly và Secure khi chạy HTTPS.
+- Nếu FE và BE khác origin, Backend phải cấu hình CORS cho đúng origin FE và AllowCredentials, không dùng wildcard.
 - Đăng ký thành công: `201` + `UserResponse`; **không tự đăng nhập**. Trùng username/email: `409`.
 - Đăng nhập thành công: `200` + `UserResponse` và thiết lập Cookie HTTP-only, Secure trên HTTPS. Đăng nhập sai: `401` + `INVALID_CREDENTIALS`.
 - `/api/auth/me`: `200` + `UserResponse` hoặc `401`. Đăng xuất: `204`, xóa Cookie.
@@ -118,11 +139,13 @@ Quy định:
 **UserDto**
 
 ```json
+
 {
-  "id": "1234567890a",
+  "id": "550e8400-e29b-41d4-a716-446655440001",
   "username": "user01",
   "displayName": "Nguyen Van A"
 }
+
 ```
 
 Không trả Email trong danh sách tìm kiếm công khai.
@@ -142,7 +165,7 @@ Không trả Email trong danh sách tìm kiếm công khai.
 
 ```json
 {
-  "targetUserId": "1234567890b"
+  "targetUserId": "550e8400-e29b-41d4-a716-446655440002"
 }
 ```
 
@@ -151,12 +174,14 @@ Không trả Email trong danh sách tìm kiếm công khai.
 **FriendshipDto**
 
 ```json
+
 {
-  "userId": "1234567890b",
+  "userId": "550e8400-e29b-41d4-a716-446655440002",
   "username": "user02",
   "displayName": "Nguyen Van B",
   "status": "Accepted"
 }
+
 ```
 
 Trạng thái: `Pending`, `Accepted`, `Rejected`, `Cancelled`. `GET /api/friendships` chỉ trả `Accepted` (`200`, mảng `FriendshipDto`). `POST /api/friendships`: `201` + `FriendshipDto` khi gửi mới; đã có lời mời Pending trả `409 FRIEND_REQUEST_ALREADY_EXISTS`. Accept/Reject/Delete thành công `204`. Không tự kết bạn. Backend kiểm tra đúng requester/receiver.
@@ -168,8 +193,15 @@ Trạng thái: `Pending`, `Accepted`, `Rejected`, `Cancelled`. `GET /api/friends
 | PUT | `/api/blocks/{userId}` | Chặn người dùng |
 | DELETE | `/api/blocks/{userId}` | Bỏ chặn |
 
+
+**Quy định chặn người dùng**
+
 - Không được tự chặn.
-- Backend kiểm tra chặn ở cả hai chiều trước khi tạo hội thoại và gửi tin riêng. `PUT/DELETE` thành công `204` (PUT lặp lại vẫn `204`); tự chặn `400 SELF_BLOCK_NOT_ALLOWED`.
+- Một người chặn người còn lại thì cả hai không được gửi tin nhắn mới.
+- Người thực hiện chặn vẫn được xem lịch sử tin nhắn cũ.
+- Người bị chặn không được xem lịch sử qua API trong thời gian đang bị chặn, trả `403 CONVERSATION_ACCESS_DENIED`.
+- Bỏ chặn không tự động khôi phục quan hệ bạn bè.
+- Backend phải kiểm tra quyền dựa trên tài khoản đang xác thực.
 
 ### 4.5. Conversations
 
@@ -181,19 +213,22 @@ Trạng thái: `Pending`, `Accepted`, `Rejected`, `Cancelled`. `GET /api/friends
 **CreateDirectConversationRequest**
 
 ```json
+ 
 {
-  "targetUserId": "1234567890b"
+  "targetUserId": "550e8400-e29b-41d4-a716-446655440002"
 }
 ```
 
 **ConversationDto**
 
 ```json
+
 {
-  "id": "1234567890c",
+  "id": "550e8400-e29b-41d4-a716-446655440003",
   "kind": "Direct",
   "lastMessageSeq": 0
 }
+
 ```
 
 - Chỉ được tạo hội thoại khi **đã kết bạn** và không bị chặn theo hai chiều; nếu không, `403 DIRECT_CONVERSATION_NOT_ALLOWED`.
@@ -205,42 +240,62 @@ Trạng thái: `Pending`, `Accepted`, `Rejected`, `Cancelled`. `GET /api/friends
 
 | Method | Endpoint | Chức năng |
 |---|---|---|
-| GET | `/api/conversations/{id}/messages?beforeSeq=...&limit=20` | Lấy lịch sử |
+| GET | `/api/conversations/{id}/messages?beforeSeq=...` hoặc `/api/conversations/{id}/messages?afterSeq=...` | Lấy lịch sử hoặc đồng bộ tin nhắn mới |
 | POST | `/api/conversations/{id}/messages` | Gửi tin nhắn |
 
 **SendMessageRequest**
 
 ```json
+
 {
-  "clientMessageId": "1234567",
+  "clientMessageId": "550e8400-e29b-41d4-a716-446655440006",
   "body": "Xin chao!"
 }
+
 ```
 
 **MessageResponse**
 
 ```json
+
 {
-  "id": "1234567890d",
-  "conversationId": "1234567890c",
-  "senderUserId": "1234567890a",
+  "id": "550e8400-e29b-41d4-a716-446655440004",
+  "conversationId": "550e8400-e29b-41d4-a716-446655440003",
+  "senderUserId": "550e8400-e29b-41d4-a716-446655440001",
   "seq": 1,
   "body": "Xin chao!",
   "createdAt": "2026-10-29T04:00:00Z"
 }
+
 ```
 
-**Lấy lịch sử:** Trả mảng `MessageResponse`, sắp xếp theo `seq` tăng dần. `beforeSeq` là mốc phân trang không bao gồm chính nó; mặc định lấy các tin mới nhất khi không truyền mốc. `limit` mặc định 20, tối đa 100.
+
+**Lấy lịch sử và đồng bộ tin nhắn**
+
+Endpoint: `GET /api/conversations/{id}/messages`
+
+| Tham số | Kiểu | Quy định |
+|---|---|---|
+| `beforeSeq` | `long?` | Lấy tối đa `limit` tin mới nhất có Seq nhỏ hơn mốc |
+| `afterSeq` | `long?` | Lấy tối đa `limit` tin sớm nhất có Seq lớn hơn mốc |
+| `limit` | `int` | Mặc định 20, tối đa 100 |
+
+- Không truyền mốc: lấy các tin mới nhất.
+- Không được truyền đồng thời `beforeSeq` và `afterSeq`.
+- Nếu truyền cả hai, trả HTTP `400 INVALID_PAGINATION_PARAMETERS`.
+- Response là mảng `MessageResponse`, sắp xếp theo Seq tăng dần.
+- `afterSeq` được sử dụng khi nhận sự kiện SignalR và khi reconnect.
 
 Quy định:
 
-- Tin nhắn văn bản từ 1–4.000 ký tự (kiểm tra ở BE); không tự trim và thay đổi payload ngầm khi retry.
-- Chỉ người trong hội thoại **còn là bạn bè và không bị chặn** mới được gửi; người từng tham gia vẫn có thể xem lịch sử nếu không bị chặn theo chính sách P0: **chặn không xóa lịch sử**, nhưng phía bị chặn không xem được lịch sử qua API trong thời gian đang bị chặn (`403 CONVERSATION_ACCESS_DENIED`).
-- Kiểm tra quyền gửi và xem tin ở Backend.
-- `Seq` tăng theo từng hội thoại.
-- Retry cùng `ClientMessageId` và cùng nội dung trả lại tin cũ (`200`).
-- Trùng `ClientMessageId` nhưng nội dung khác trả `409`.
-- Gửi tin mới thành công trả `201`.
+- Tin nhắn văn bản từ 1–4.000 ký tự; không tự thay đổi nội dung khi retry.
+- Chỉ thành viên hội thoại còn là bạn bè và không bị chặn mới được gửi tin.
+- Kiểm tra quyền xem lịch sử theo quy tắc Blocks.
+- `Seq` tăng theo từng hội thoại bằng transaction và cập nhật nguyên tử `Conversations.LastMessageSeq`.
+- Retry cùng `ClientMessageId` và cùng nội dung trả tin cũ với HTTP `200`.
+- Trùng `ClientMessageId` nhưng khác nội dung trả HTTP `409 CLIENT_MESSAGE_ID_CONFLICT`.
+- Gửi tin mới thành công trả HTTP `201`.
+- Chỉ phát SignalR sau khi transaction commit thành công.
 
 
 ## 5. Interface dùng chung Backend
@@ -310,6 +365,10 @@ Task UnblockAsync(
 Task<bool> IsBlockedAsync(
     Guid userAId,
     Guid userBId);
+
+Task<bool> HasBlockedAsync(
+    Guid blockerUserId,
+    Guid blockedUserId);
 ```
 
 `IsBlockedAsync` trả `true` nếu một trong hai người đã chặn người còn lại.
@@ -338,6 +397,13 @@ Task<List<MessageResponse>> GetHistoryAsync(
     Guid conversationId,
     long? beforeSeq,
     int limit = 20);
+
+Task<List<MessageResponse>> GetNewMessagesAsync(
+    Guid currentUserId,
+    Guid conversationId,
+    long afterSeq,
+    int limit = 20);
+
 ```
 
 ### 5.7. Quy định chung
@@ -367,20 +433,25 @@ Hub bắt buộc xác thực bằng Cookie.
 **ConversationChanged Payload**
 
 ```json
+
 {
-  "eventId": "1234567890e",
-  "conversationId": "1234567890c",
+  "eventId": "550e8400-e29b-41d4-a716-446655440005",
+  "conversationId": "550e8400-e29b-41d4-a716-446655440003",
   "latestSeq": 1
 }
+
 ```
 
-**Quy trình gửi tin nhắn:**
+
+**Quy trình gửi tin nhắn**
 
 1. Frontend gọi `POST /api/conversations/{id}/messages`.
-2. Backend kiểm tra quyền và lưu tin vào PostgreSQL.
-3. Sau khi lưu thành công, Backend phát sự kiện `ConversationChanged`.
-4. Frontend nhận sự kiện và lấy tin mới từ API.
-5. Khi reconnect, Frontend tải lại lịch sử để đồng bộ.
+2. Backend kiểm tra quyền, cấp Seq và lưu tin nhắn trong transaction PostgreSQL.
+3. Sau khi commit thành công, Backend phát `ConversationChanged` đến những người có quyền nhận thông báo.
+4. Frontend nhận event và gọi GET Messages với `afterSeq`.
+5. Khi reconnect, Frontend tiếp tục đồng bộ từ Seq cuối cùng đã nhận.
+6. Frontend xử lý event trùng và không dùng SignalR thay thế Database.
+
 
 SignalR chỉ thông báo realtime, không thay thế Database.
 
@@ -401,14 +472,19 @@ SignalR chỉ thông báo realtime, không thay thế Database.
 
 **Ghi chú:** Tài liệu này là hợp đồng thiết kế của source khung. Chưa có nghĩa các API và chức năng đã được triển khai.
 
-## 8. PHỤ LỤC TÍCH HỢP FE – BE – DB (BẮT BUỘC, v1.1)
+## 8. PHỤ LỤC TÍCH HỢP FE – BE – DB (BẮT BUỘC, v1.)
 
 **Tên dự án và database:** `chat_zalo`. Giữ nguyên namespace, tên `.sln`/`.csproj` đang là `Chat.*` để tránh phá tham chiếu; `chat_zalo` là tên repo, thư mục và database, **không phải lệnh đổi mọi class thành chat_zalo**.
 
 ### A. Cấu hình và bảo mật
 - API phát triển ở `http://localhost:5080`; FE Blazor ở origin riêng khi chạy `dotnet run`, đọc `ApiBaseUrl` từ `frontend/wwwroot/appsettings.json`. `/api` là **đường dẫn API**, không phải origin. `localhost:5080` chỉ là mặc định phát triển.
 - Bản demo production ưu tiên reverse proxy cùng origin qua HTTPS; API và Hub dùng chung auth cookie. Khi dev khác origin: CORS phải chỉ định origin FE cụ thể + `AllowCredentials`, không dùng wildcard; cookie `SameSite`/`Secure` phù hợp, thực hiện CSRF token chống ghi dữ liệu trái phép. `BrowserRequestCredentials.Include` với HttpClient dùng browser fetch; SignalR cần cookie cùng cơ chế của trình duyệt. Không gửi auth cookie bằng tay.
-- CSRF: mọi POST/PATCH/PUT/DELETE có xác thực cần anti-forgery token được kiểm tra phía BE; endpoint phát token và header name do task auth chốt trước khi FE auth tích hợp (đề xuất `GET /api/auth/csrf`, header `X-CSRF-TOKEN`). Đăng nhập và đăng ký cũng phải cân nhắc login CSRF. Không coi CORS là chống CSRF.
+- CSRF: Tất cả POST/PUT/PATCH/DELETE phải có token hợp lệ.
+  Backend cấp token qua GET /api/auth/csrf.
+  Frontend gửi header X-CSRF-TOKEN.
+  Backend kiểm tra token bằng ASP.NET Core Antiforgery.
+  Thiếu hoặc sai token trả HTTP 400 INVALID_CSRF_TOKEN.
+  CORS không thay thế cơ chế chống CSRF.
 - Mọi route trừ register/login (và endpoint cấp CSRF nếu có) yêu cầu đăng nhập. Khi không xác thực, API trả `401` JSON, không redirect HTML. `403` dành cho truy cập bị cấm. FE không lưu mật khẩu hoặc cookie HttpOnly trong localStorage.
 - Kết nối DB chỉ ở BE; không gửi chuỗi kết nối tới Blazor. Cấu hình local khớp `Database=chat_zalo;Username=chat_zalo`; secrets thực tế dùng env `ConnectionStrings__ChatDb` hoặc user-secrets.
 
