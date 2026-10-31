@@ -12,7 +12,7 @@
 chat_zalo/
 ├── frontend/                  # Blazor UI – pages/components/services placeholders
 ├── backend/                   # Chat.Api, Chat.Application, Chat.Domain, Chat.Infrastructure
-├── database/                  # ERD, database rules; chưa có migration
+├── database/                  # ERD, database rules, migrations và database.sql
 ├── docs/                      # API contract, FE, Git rules
 ├── tests/                     # test placeholders
 └── docker-compose.yml         # PostgreSQL,, chưa có container FE/BE
@@ -32,7 +32,7 @@ dotnet run --project frontend/Chat.Client.csproj
 - Backend profile `Chat.Api` mặc định chạy `http://localhost:5080` (khớp `frontend/wwwroot/appsettings.json`).
 - BE connection string demo `Host=localhost;Port=5432;Database=chat_zalo;Username=chat_zalo;Password=dev_change_me`; cấu hình nằm trong `backend/Chat.Api/appsettings.json`; secrets thật override qua `ConnectionStrings__ChatDb`.
 - FE `frontend/wwwroot/appsettings.json`: `ApiBaseUrl=http://localhost:5080/` (công khai). Tên origin FE tùy cổng runtime; đội auth phải cấu hình CORS/Cookie/CSRF trước khi gọi API.
-- **Hiện Program.cs của BE chỉ map `/health` + controllers; chưa đăng ký Identity, DbContext, SignalR; không được nhầm với ứng dụng chat đã chạy hoàn chỉnh.**
+- Backend đã đăng ký Identity Core và DbContext; có `/health`, controllers và OpenAPI trong Development. Controllers/services nghiệp vụ vẫn là placeholders, chưa có luồng chat hoàn chỉnh hoặc SignalR runtime.
 - Docker Compose **chỉ tạo DB**, không chạy FE/BE; `docker compose down -v` sẽ xóa volume dữ liệu, chỉ làm khi đã sao lưu hoặc không có dữ liệu cần giữ.
 
 ## Phạm vi
@@ -44,6 +44,6 @@ dotnet run --project frontend/Chat.Client.csproj
 2. [Database Rules v1.1](database/DATABASE_RULES.md) – schema, invariants và migration ownership.
 3. [ERD](database/ERD.mmd) – sơ đồ logic.
 4. [Frontend Blazor Guide](docs/FRONTEND_BLAZOR_GUIDE.md) – client/service boundaries.
-5. [Git Rules](docs/GIT_RULES.md) – branch/PR và shared-file review.
+5. Source chính nằm trong `backend/`, `frontend/`, `tests/` và `database/`; không giữ bản source lồng. Xem `git status` và diff trước khi commit.
 6. [Database README](database/README.md) – cách bootstrap database.
 

@@ -1,0 +1,103 @@
+﻿ server_version 
+----------------
+ 18.6
+(1 row)
+
+                          MigrationId                          | ProductVersion 
+---------------------------------------------------------------+----------------
+ 20261029192059_InitialCreate                                  | 10.0.14
+ 20261030104611_AddUniqueEmailConstraint                       | 10.0.14
+ 20261030151320_RestoreConversationRelationshipsAndConstraints | 10.0.14
+ 20261030151359_FixConversationForeignKeys                     | 10.0.14
+(4 rows)
+
+       tablename       
+-----------------------
+ ConversationMembers
+ Conversations
+ DirectConversations
+ Friendships
+ Messages
+ RoleClaims
+ Roles
+ UserBlocks
+ UserClaims
+ UserLogins
+ UserRoles
+ UserTokens
+ Users
+ __EFMigrationsHistory
+(14 rows)
+
+       table_name        |                       conname                       |                                                                                   definition                                                                                   
+-------------------------+-----------------------------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ "__EFMigrationsHistory" | PK___EFMigrationsHistory                            | PRIMARY KEY ("MigrationId")
+ "Roles"                 | PK_Roles                                            | PRIMARY KEY ("Id")
+ "Users"                 | PK_Users                                            | PRIMARY KEY ("Id")
+ "RoleClaims"            | FK_RoleClaims_Roles_RoleId                          | FOREIGN KEY ("RoleId") REFERENCES "Roles"("Id") ON DELETE CASCADE
+ "RoleClaims"            | PK_RoleClaims                                       | PRIMARY KEY ("Id")
+ "Conversations"         | CK_Conversations_Kind                               | CHECK ((("Kind")::text = ANY ((ARRAY['Direct'::character varying, 'Group'::character varying])::text[])))
+ "Conversations"         | CK_Conversations_LastMessageSeq                     | CHECK (("LastMessageSeq" >= 0))
+ "Conversations"         | FK_Conversations_Users_CreatedByUserId              | FOREIGN KEY ("CreatedByUserId") REFERENCES "Users"("Id") ON DELETE RESTRICT
+ "Conversations"         | PK_Conversations                                    | PRIMARY KEY ("Id")
+ "Friendships"           | CK_Friendships_RequesterUserId                      | CHECK ((("RequesterUserId" = "UserLowId") OR ("RequesterUserId" = "UserHighId")))
+ "Friendships"           | CK_Friendships_Status                               | CHECK ((("Status")::text = ANY ((ARRAY['Pending'::character varying, 'Accepted'::character varying, 'Rejected'::character varying, 'Cancelled'::character varying])::text[])))
+ "Friendships"           | CK_Friendships_UserOrder                            | CHECK (("UserLowId" < "UserHighId"))
+ "Friendships"           | FK_Friendships_Users_RequesterUserId                | FOREIGN KEY ("RequesterUserId") REFERENCES "Users"("Id") ON DELETE RESTRICT
+ "Friendships"           | FK_Friendships_Users_UserHighId                     | FOREIGN KEY ("UserHighId") REFERENCES "Users"("Id") ON DELETE RESTRICT
+ "Friendships"           | FK_Friendships_Users_UserLowId                      | FOREIGN KEY ("UserLowId") REFERENCES "Users"("Id") ON DELETE RESTRICT
+ "Friendships"           | PK_Friendships                                      | PRIMARY KEY ("UserLowId", "UserHighId")
+ "UserBlocks"            | CK_UserBlocks_SelfBlock                             | CHECK (("BlockerUserId" <> "BlockedUserId"))
+ "UserBlocks"            | FK_UserBlocks_Users_BlockedUserId                   | FOREIGN KEY ("BlockedUserId") REFERENCES "Users"("Id") ON DELETE RESTRICT
+ "UserBlocks"            | FK_UserBlocks_Users_BlockerUserId                   | FOREIGN KEY ("BlockerUserId") REFERENCES "Users"("Id") ON DELETE RESTRICT
+ "UserBlocks"            | PK_UserBlocks                                       | PRIMARY KEY ("BlockerUserId", "BlockedUserId")
+ "UserClaims"            | FK_UserClaims_Users_UserId                          | FOREIGN KEY ("UserId") REFERENCES "Users"("Id") ON DELETE CASCADE
+ "UserClaims"            | PK_UserClaims                                       | PRIMARY KEY ("Id")
+ "UserLogins"            | FK_UserLogins_Users_UserId                          | FOREIGN KEY ("UserId") REFERENCES "Users"("Id") ON DELETE CASCADE
+ "UserLogins"            | PK_UserLogins                                       | PRIMARY KEY ("LoginProvider", "ProviderKey")
+ "UserRoles"             | FK_UserRoles_Roles_RoleId                           | FOREIGN KEY ("RoleId") REFERENCES "Roles"("Id") ON DELETE CASCADE
+ "UserRoles"             | FK_UserRoles_Users_UserId                           | FOREIGN KEY ("UserId") REFERENCES "Users"("Id") ON DELETE CASCADE
+ "UserRoles"             | PK_UserRoles                                        | PRIMARY KEY ("UserId", "RoleId")
+ "UserTokens"            | FK_UserTokens_Users_UserId                          | FOREIGN KEY ("UserId") REFERENCES "Users"("Id") ON DELETE CASCADE
+ "UserTokens"            | PK_UserTokens                                       | PRIMARY KEY ("UserId", "LoginProvider", "Name")
+ "ConversationMembers"   | CK_ConversationMembers_LastDeliveredSeqNonNegative  | CHECK (("LastDeliveredSeq" >= 0))
+ "ConversationMembers"   | CK_ConversationMembers_LastReadSeqNonNegative       | CHECK (("LastReadSeq" >= 0))
+ "ConversationMembers"   | CK_ConversationMembers_Role                         | CHECK ((("Role")::text = ANY ((ARRAY['Member'::character varying, 'Admin'::character varying, 'Owner'::character varying])::text[])))
+ "ConversationMembers"   | CK_ConversationMembers_SeqReadDelivered             | CHECK (("LastReadSeq" <= "LastDeliveredSeq"))
+ "ConversationMembers"   | FK_ConversationMembers_Conversations_ConversationId | FOREIGN KEY ("ConversationId") REFERENCES "Conversations"("Id") ON DELETE CASCADE
+ "ConversationMembers"   | FK_ConversationMembers_Users_UserId                 | FOREIGN KEY ("UserId") REFERENCES "Users"("Id") ON DELETE RESTRICT
+ "ConversationMembers"   | PK_ConversationMembers                              | PRIMARY KEY ("ConversationId", "UserId")
+ "DirectConversations"   | CK_DirectConversations_UserOrder                    | CHECK (("UserLowId" < "UserHighId"))
+ "DirectConversations"   | FK_DirectConversations_Conversations_ConversationId | FOREIGN KEY ("ConversationId") REFERENCES "Conversations"("Id") ON DELETE CASCADE
+ "DirectConversations"   | FK_DirectConversations_Users_UserHighId             | FOREIGN KEY ("UserHighId") REFERENCES "Users"("Id") ON DELETE RESTRICT
+ "DirectConversations"   | FK_DirectConversations_Users_UserLowId              | FOREIGN KEY ("UserLowId") REFERENCES "Users"("Id") ON DELETE RESTRICT
+ "DirectConversations"   | PK_DirectConversations                              | PRIMARY KEY ("ConversationId")
+ "Messages"              | FK_Messages_Conversations_ConversationId            | FOREIGN KEY ("ConversationId") REFERENCES "Conversations"("Id") ON DELETE CASCADE
+ "Messages"              | FK_Messages_Users_SenderUserId                      | FOREIGN KEY ("SenderUserId") REFERENCES "Users"("Id") ON DELETE RESTRICT
+ "Messages"              | PK_Messages                                         | PRIMARY KEY ("Id")
+(44 rows)
+
+       tablename       |                        indexname                        |                                                                               indexdef                                                                               
+-----------------------+---------------------------------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ ConversationMembers   | PK_ConversationMembers                                  | CREATE UNIQUE INDEX "PK_ConversationMembers" ON public."ConversationMembers" USING btree ("ConversationId", "UserId")
+ Conversations         | PK_Conversations                                        | CREATE UNIQUE INDEX "PK_Conversations" ON public."Conversations" USING btree ("Id")
+ DirectConversations   | IX_DirectConversations_UserLowId_UserHighId             | CREATE UNIQUE INDEX "IX_DirectConversations_UserLowId_UserHighId" ON public."DirectConversations" USING btree ("UserLowId", "UserHighId")
+ DirectConversations   | PK_DirectConversations                                  | CREATE UNIQUE INDEX "PK_DirectConversations" ON public."DirectConversations" USING btree ("ConversationId")
+ Friendships           | PK_Friendships                                          | CREATE UNIQUE INDEX "PK_Friendships" ON public."Friendships" USING btree ("UserLowId", "UserHighId")
+ Messages              | IX_Messages_ConversationId_SenderUserId_ClientMessageId | CREATE UNIQUE INDEX "IX_Messages_ConversationId_SenderUserId_ClientMessageId" ON public."Messages" USING btree ("ConversationId", "SenderUserId", "ClientMessageId")
+ Messages              | IX_Messages_ConversationId_Seq                          | CREATE UNIQUE INDEX "IX_Messages_ConversationId_Seq" ON public."Messages" USING btree ("ConversationId", "Seq")
+ Messages              | PK_Messages                                             | CREATE UNIQUE INDEX "PK_Messages" ON public."Messages" USING btree ("Id")
+ RoleClaims            | PK_RoleClaims                                           | CREATE UNIQUE INDEX "PK_RoleClaims" ON public."RoleClaims" USING btree ("Id")
+ Roles                 | PK_Roles                                                | CREATE UNIQUE INDEX "PK_Roles" ON public."Roles" USING btree ("Id")
+ Roles                 | RoleNameIndex                                           | CREATE UNIQUE INDEX "RoleNameIndex" ON public."Roles" USING btree ("NormalizedName")
+ UserBlocks            | PK_UserBlocks                                           | CREATE UNIQUE INDEX "PK_UserBlocks" ON public."UserBlocks" USING btree ("BlockerUserId", "BlockedUserId")
+ UserClaims            | PK_UserClaims                                           | CREATE UNIQUE INDEX "PK_UserClaims" ON public."UserClaims" USING btree ("Id")
+ UserLogins            | PK_UserLogins                                           | CREATE UNIQUE INDEX "PK_UserLogins" ON public."UserLogins" USING btree ("LoginProvider", "ProviderKey")
+ UserRoles             | PK_UserRoles                                            | CREATE UNIQUE INDEX "PK_UserRoles" ON public."UserRoles" USING btree ("UserId", "RoleId")
+ UserTokens            | PK_UserTokens                                           | CREATE UNIQUE INDEX "PK_UserTokens" ON public."UserTokens" USING btree ("UserId", "LoginProvider", "Name")
+ Users                 | EmailIndex                                              | CREATE UNIQUE INDEX "EmailIndex" ON public."Users" USING btree ("NormalizedEmail")
+ Users                 | PK_Users                                                | CREATE UNIQUE INDEX "PK_Users" ON public."Users" USING btree ("Id")
+ Users                 | UserNameIndex                                           | CREATE UNIQUE INDEX "UserNameIndex" ON public."Users" USING btree ("NormalizedUserName")
+ __EFMigrationsHistory | PK___EFMigrationsHistory                                | CREATE UNIQUE INDEX "PK___EFMigrationsHistory" ON public."__EFMigrationsHistory" USING btree ("MigrationId")
+(20 rows)
+
