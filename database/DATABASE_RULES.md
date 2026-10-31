@@ -86,5 +86,5 @@ Các FK và CHECK phải được cấu hình trong EF Core, không chỉ ghi tr
 - `ClientMessageId` unique theo `(ConversationId, SenderUserId, ClientMessageId)`; body giống khi retry trả tin đã lưu, khác trả `409`. `CreatedAt` lưu UTC (`timestamptz`).
 - Chỉ thành viên hội thoại có quyền đọc, áp dụng chính sách chặn của `API_CONTRACT.md`; chặn không xóa tin đã lưu.
 - Migrations chỉ một owner tại thời điểm làm; commit cùng code entity/config và review của leader; không có raw SQL schema chạy song song với Code First.
-- `ERD.mmd` là sơ đồ logic, chưa phải EF Migration; **chưa có triển khai `ChatDbContext`, entity và migration**, nhóm DB phải xây dựng theo tài liệu.
+- `ERD.mmd` là sơ đồ logic; entity, `ChatDbContext`, EF Configurations và migrations hiện nằm trong `backend/`. Configurations được áp dụng qua `ApplyConfigurationsFromAssembly` sau cấu hình Identity cơ sở.
 - Local: `Database=chat_zalo`, `Username=chat_zalo`, `Password=dev_change_me` chỉ là thông tin demo trên máy dev; môi trường thật dùng secret từ biến môi trường, không commit mật khẩu thật.
