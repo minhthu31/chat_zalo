@@ -1,3 +1,5 @@
+using Chat.Application.Interfaces;
+using Chat.Application.Services;
 using Chat.Infrastructure.Data;
 using Chat.Infrastructure.Identity;
 using Microsoft.AspNetCore.Identity;
@@ -8,7 +10,8 @@ var builder = WebApplication.CreateBuilder(args);
 // Read local configuration or override with environment variables.
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
     ?? builder.Configuration.GetConnectionString("ChatDb")
-    ?? throw new InvalidOperationException("Configure ConnectionStrings:ChatDb or ConnectionStrings:DefaultConnection.");
+    ?? throw new InvalidOperationException(
+        "Configure ConnectionStrings:ChatDb or ConnectionStrings:DefaultConnection.");
 
 builder.Services.AddDbContext<ChatDbContext>(options =>
     options.UseNpgsql(connectionString));
@@ -23,9 +26,14 @@ builder.Services.AddIdentityCore<ApplicationUser>(options =>
 .AddEntityFrameworkStores<ChatDbContext>()
 .AddDefaultTokenProviders();
 
+// ---- Application services ----
+builder.Services.AddScoped<IFriendshipService, FriendshipService>();
+builder.Services.AddScoped<IBlockService, BlockService>();
+builder.Services.AddScoped<IConversationService, ConversationService>();
+
 builder.Services.AddControllers();
 
-// OpenAPI chuẩn .NET 10
+// OpenAPI (.NET 10)
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddOpenApi();
 
