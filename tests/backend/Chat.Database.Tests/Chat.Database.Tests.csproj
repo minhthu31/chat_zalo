@@ -15,5 +15,6 @@
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <ProjectReference Include="..\..\..\backend\Chat.Infrastructure\Chat.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\..\backend\Chat.Application\Chat.Application.csproj" />
   </ItemGroup>
 </Project>
