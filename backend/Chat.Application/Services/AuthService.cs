@@ -1,4 +1,4 @@
-using System.Net.Mail;
+﻿using System.Net.Mail;
 using Chat.Application.DTOs.Auth;
 using Chat.Application.Interfaces;
 
@@ -9,6 +9,7 @@ public sealed class AuthService : IAuthService
     // Giới hạn kích thước đầu vào để tránh payload bất thường.
     // do người phụ trách Program.cs/Identity quản lý.
     private const int MaxIdentifierLength = 256;
+    private const int MaxUsernameLength = 100;
     private const int MaxEmailLength = 256;
     private const int MaxPasswordLength = 256;
 
@@ -76,8 +77,8 @@ public sealed class AuthService : IAuthService
         }
 
         if (string.IsNullOrWhiteSpace(request.Username)
-            || request.Username.Length > MaxIdentifierLength)
-            errors.Add("Tên đăng nhập không được để trống và không vượt quá 256 ký tự.");
+            || request.Username.Length > MaxUsernameLength)
+            errors.Add("Tên đăng nhập không được để trống và không vượt quá 100 ký tự.");
 
         if (!IsValidEmail(request.Email))
             errors.Add("Email không hợp lệ.");

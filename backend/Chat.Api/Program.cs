@@ -1,4 +1,4 @@
-using Chat.Api.Controllers;
+﻿using Chat.Api.Controllers;
 using Chat.Application.DTOs.Auth;
 using Chat.Application.Interfaces;
 using Chat.Application.Services;
@@ -123,6 +123,27 @@ builder.Services.AddScoped<IAccountGateway, IdentityAccountGateway>();
 
 
 builder.Services.AddControllers();
+
+builder.Services.Configure<Microsoft.AspNetCore.Mvc.ApiBehaviorOptions>(options =>
+{
+    options.InvalidModelStateResponseFactory = context =>
+    {
+        var errors = context.ModelState
+            .Where(e => e.Value?.Errors.Count > 0)
+            .SelectMany(e => e.Value!.Errors.Select(err => err.ErrorMessage))
+            .ToList();
+
+        var message = errors.Count > 0
+            ? string.Join(" ", errors)
+            : "Dữ liệu gửi lên không hợp lệ.";
+
+        return new BadRequestObjectResult(new AuthErrorResponse
+        {
+            Code = "VALIDATION_ERROR",
+            Message = message
+        });
+    };
+});
 
 // OpenAPI chuẩn .NET 10
 builder.Services.AddEndpointsApiExplorer();
