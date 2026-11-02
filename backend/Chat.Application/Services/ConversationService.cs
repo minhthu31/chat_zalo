@@ -40,20 +40,13 @@ public class ConversationService : IConversationService
 
     private static ConversationDto ToDto(
         Conversation conv,
-        ConversationMember myMember,
         bool isNewlyCreated = false)
         => new()
         {
-            Id               = conv.Id,
-            Kind             = conv.Kind,
-            CreatedByUserId  = conv.CreatedByUserId,
-            LastMessageSeq   = conv.LastMessageSeq,
-            CreatedAt        = conv.CreatedAt,
-            LastActivityAt   = conv.LastActivityAt,
-            LastReadSeq      = myMember.LastReadSeq,
-            LastDeliveredSeq = myMember.LastDeliveredSeq,
-            UnreadCount      = Math.Max(0L, conv.LastMessageSeq - myMember.LastReadSeq),
-            IsNewlyCreated   = isNewlyCreated,
+            Id             = conv.Id,
+            Kind           = conv.Kind,
+            LastMessageSeq = conv.LastMessageSeq,
+            IsNewlyCreated = isNewlyCreated,
         };
 
     // -----------------------------------------------------------------------
@@ -84,10 +77,8 @@ public class ConversationService : IConversationService
 
             var conv = await _dbContext.Conversations.FindAsync(existing.ConversationId)
                        ?? throw new InvalidOperationException("Conversation record missing.");
-            var member = await _dbContext.ConversationMembers.FindAsync(existing.ConversationId, currentUserId)
-                         ?? throw new InvalidOperationException("Member record missing.");
 
-            return ToDto(conv, member, isNewlyCreated: false);
+            return ToDto(conv, isNewlyCreated: false);
         }
 
         // ---- New conversation path ----
@@ -153,7 +144,7 @@ public class ConversationService : IConversationService
             await _dbContext.SaveChangesAsync();
             await tx.CommitAsync();
 
-            return ToDto(conversation, memberCurrent, isNewlyCreated: true);
+            return ToDto(conversation, isNewlyCreated: true);
         }
         catch (DbUpdateException ex)
             when (ex.InnerException is PostgresException { SqlState: "23505" })
@@ -167,12 +158,10 @@ public class ConversationService : IConversationService
                 ?? throw new InvalidOperationException(
                     "Race condition resolved but existing record could not be found.");
 
-            var conv   = await _dbContext.Conversations.FindAsync(race.ConversationId)
-                         ?? throw new InvalidOperationException("Conversation record missing after race.");
-            var member = await _dbContext.ConversationMembers.FindAsync(race.ConversationId, currentUserId)
-                         ?? throw new InvalidOperationException("Member record missing after race.");
+            var conv = await _dbContext.Conversations.FindAsync(race.ConversationId)
+                       ?? throw new InvalidOperationException("Conversation record missing after race.");
 
-            return ToDto(conv, member, isNewlyCreated: false);
+            return ToDto(conv, isNewlyCreated: false);
         }
         catch
         {
@@ -198,7 +187,7 @@ public class ConversationService : IConversationService
             .ToListAsync();
 
         return items
-            .Select(x => ToDto(x.Conversation, x.Member))
+            .Select(x => ToDto(x.Conversation))
             .ToList();
     }
 }

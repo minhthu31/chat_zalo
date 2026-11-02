@@ -13,20 +13,25 @@ public class BlockService : IBlockService
         _dbContext = dbContext;
     }
 
+    public Task BlockAsync(Guid currentUserId, Guid targetUserId)
+        => throw new NotImplementedException();
+
+    public Task UnblockAsync(Guid currentUserId, Guid targetUserId)
+        => throw new NotImplementedException();
+
     /// <inheritdoc/>
-    public async Task<bool> IsBlockedAsync(Guid userAId, Guid userBId, CancellationToken ct = default)
+    public async Task<bool> IsBlockedAsync(Guid userAId, Guid userBId)
     {
         // Bidirectional: either party may have blocked the other
         return await _dbContext.UserBlocks.AnyAsync(b =>
             (b.BlockerUserId == userAId && b.BlockedUserId == userBId) ||
-            (b.BlockerUserId == userBId && b.BlockedUserId == userAId), ct);
+            (b.BlockerUserId == userBId && b.BlockedUserId == userAId));
     }
 
     /// <inheritdoc/>
-    public async Task<bool> HasBlockedAsync(Guid blockerUserId, Guid blockedUserId, CancellationToken ct = default)
+    public async Task<bool> HasBlockedAsync(Guid blockerUserId, Guid blockedUserId)
     {
         return await _dbContext.UserBlocks.AnyAsync(b =>
-            b.BlockerUserId == blockerUserId && b.BlockedUserId == blockedUserId, ct);
+            b.BlockerUserId == blockerUserId && b.BlockedUserId == blockedUserId);
     }
 }
-

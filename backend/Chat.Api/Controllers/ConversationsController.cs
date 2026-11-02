@@ -1,43 +1,37 @@
 using System.Security.Claims;
+using Chat.Api.Filters;
+using Chat.Application.DTOs.Auth;
 using Chat.Application.DTOs.Conversations;
 using Chat.Application.Interfaces;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Chat.Api.Controllers;
 
+[Authorize]
 [ApiController]
 [Route("api/conversations")]
 public class ConversationsController : ControllerBase
 {
     private readonly IConversationService _conversationService;
-    private readonly IWebHostEnvironment _env;
 
-    public ConversationsController(
-        IConversationService conversationService,
-        IWebHostEnvironment env)
+    public ConversationsController(IConversationService conversationService)
     {
         _conversationService = conversationService;
-        _env = env;
     }
 
     // -----------------------------------------------------------------------
-    // Helper: resolve the calling user's ID
+    // Helper: resolve the authenticated user's ID
     // -----------------------------------------------------------------------
 
     private Guid? ResolveCurrentUserId()
     {
-        // Primary source: JWT / Identity claim
+        if (User.Identity?.IsAuthenticated != true)
+            return null;
+
         var sub = User.FindFirstValue(ClaimTypes.NameIdentifier);
         if (Guid.TryParse(sub, out var userId))
             return userId;
-
-        // Development fallback: X-User-Id header (no auth middleware yet)
-        if (_env.IsDevelopment())
-        {
-            var header = Request.Headers["X-User-Id"].FirstOrDefault();
-            if (Guid.TryParse(header, out var devId))
-                return devId;
-        }
 
         return null;
     }
@@ -47,29 +41,30 @@ public class ConversationsController : ControllerBase
     // -----------------------------------------------------------------------
 
     [HttpPost("direct")]
+    [ValidateAntiforgeryJson(ErrorMessage = "Invalid or missing CSRF token")]
     public async Task<IActionResult> CreateDirect(
         [FromBody] CreateDirectConversationRequest request)
     {
         if (!ModelState.IsValid)
-            return BadRequest(new
+            return BadRequest(new AuthErrorResponse
             {
-                code    = "VALIDATION_ERROR",
-                message = "TargetUserId is required and must be a valid GUID."
+                Code    = "VALIDATION_ERROR",
+                Message = "TargetUserId is required and must be a valid GUID."
             });
 
         if (request.TargetUserId == Guid.Empty)
-            return BadRequest(new
+            return BadRequest(new AuthErrorResponse
             {
-                code    = "VALIDATION_ERROR",
-                message = "TargetUserId must not be an empty GUID."
+                Code    = "VALIDATION_ERROR",
+                Message = "TargetUserId must not be an empty GUID."
             });
 
         var currentUserId = ResolveCurrentUserId();
         if (currentUserId is null)
-            return Unauthorized(new
+            return StatusCode(StatusCodes.Status401Unauthorized, new AuthErrorResponse
             {
-                code    = "UNAUTHORIZED",
-                message = "User identity could not be determined."
+                Code    = "UNAUTHORIZED",
+                Message = "Unauthorized"
             });
 
         try
@@ -77,25 +72,24 @@ public class ConversationsController : ControllerBase
             var dto = await _conversationService.CreateDirectAsync(
                 currentUserId.Value, request.TargetUserId);
 
-            // HTTP 201 when a new conversation was created; HTTP 200 when it already existed
             return dto.IsNewlyCreated
-                ? StatusCode(201, dto)
+                ? StatusCode(StatusCodes.Status201Created, dto)
                 : Ok(dto);
         }
         catch (UnauthorizedAccessException ex) when (ex.Message == "DIRECT_CONVERSATION_NOT_ALLOWED")
         {
-            return StatusCode(403, new
+            return StatusCode(StatusCodes.Status403Forbidden, new AuthErrorResponse
             {
-                code    = "DIRECT_CONVERSATION_NOT_ALLOWED",
-                message = "You are not allowed to create this conversation."
+                Code    = "DIRECT_CONVERSATION_NOT_ALLOWED",
+                Message = "You are not allowed to create this conversation."
             });
         }
         catch (ArgumentException ex)
         {
-            return BadRequest(new
+            return BadRequest(new AuthErrorResponse
             {
-                code    = "VALIDATION_ERROR",
-                message = ex.Message
+                Code    = "VALIDATION_ERROR",
+                Message = ex.Message
             });
         }
     }
@@ -109,10 +103,10 @@ public class ConversationsController : ControllerBase
     {
         var currentUserId = ResolveCurrentUserId();
         if (currentUserId is null)
-            return Unauthorized(new
+            return StatusCode(StatusCodes.Status401Unauthorized, new AuthErrorResponse
             {
-                code    = "UNAUTHORIZED",
-                message = "User identity could not be determined."
+                Code    = "UNAUTHORIZED",
+                Message = "Unauthorized"
             });
 
         var dtos = await _conversationService.GetConversationsAsync(currentUserId.Value);
