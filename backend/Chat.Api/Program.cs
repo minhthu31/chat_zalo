@@ -148,6 +148,7 @@ builder.Services.Configure<Microsoft.AspNetCore.Mvc.ApiBehaviorOptions>(options 
 // OpenAPI chuẩn .NET 10
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddOpenApi();
+builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
 
@@ -158,10 +159,35 @@ app.UseAuthorization();
 
 if (app.Environment.IsDevelopment())
 {
+    app.UseSwagger();
+    app.UseSwaggerUI();
     app.MapOpenApi();
 }
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
+app.MapControllers();
+
+app.Run();
+
+
+
+
+builder.Services.AddOpenApi();
+
+
+
+if (app.Environment.IsDevelopment())
+{
+    app.MapOpenApi();
+}
+
+// 7. Cau hinh HTTP pipeline
+app.UseHttpsRedirection();
+app.UseHttpsRedirection();
+
+app.UseAuthentication();
+app.UseAuthorization();
+
 app.MapControllers();
 
 app.Run();
