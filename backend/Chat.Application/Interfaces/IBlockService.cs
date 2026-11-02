@@ -1,12 +1,22 @@
+
 namespace Chat.Application.Interfaces;
 
 public interface IBlockService
 {
-    Task BlockUserAsync(Guid blockerUserId, Guid blockedUserId);
+    Task BlockAsync(
+        Guid currentUserId,
+        Guid targetUserId);
 
-    Task UnblockUserAsync(Guid blockerUserId, Guid blockedUserId);
+    Task UnblockAsync(
+        Guid currentUserId,
+        Guid targetUserId);
 
-    Task<bool> IsBlockedAsync(Guid userId1, Guid userId2);
+    Task<bool> IsBlockedAsync(
+        Guid userAId,
+        Guid userBId);
 
-    Task<bool> IsBlockedByUserAsync(Guid blockerUserId, Guid blockedUserId);
+    Task<bool> HasBlockedAsync(
+        Guid blockerUserId,
+        Guid blockedUserId);
 }
+
