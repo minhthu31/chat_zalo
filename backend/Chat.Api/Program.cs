@@ -122,6 +122,9 @@ builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IBlockService, BlockService>();
 builder.Services.AddScoped<IAccountGateway, IdentityAccountGateway>();
 
+// CHAT-3: Users API
+builder.Services.AddScoped<IUserService, UserService>();
+builder.Services.AddScoped<IUserAccountGateway, IdentityUserAccountGateway>();
 
 builder.Services.AddControllers();
 
