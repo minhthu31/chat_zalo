@@ -163,5 +163,5 @@ if (app.Environment.IsDevelopment())
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapControllers();
-
+app.MapHub<ChatHub>("/hubs/chat");
 app.Run();

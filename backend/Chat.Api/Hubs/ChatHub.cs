@@ -1,34 +1,49 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
-using System.Threading.Tasks;
+using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
 
 namespace chat_zalo.Hubs
 {
-    [Authorize] // Chặn người chưa xác thực (Yêu cầu 3)
+    [Authorize]
     public class ChatHub : Hub
     {
-        // Hàm tham gia nhóm theo ConversationId có kiểm tra quyền (Yêu cầu 4, 5)
-        public async Task JoinConversation(string conversationId)
-        {
-            // TODO: Bổ sung logic kiểm tra xem user hiện tại có thuộc về conversationId này không ở đây nếu cần
+        private readonly AppDbContext _dbContext;
 
-            await Groups.AddToAsync(Context.ConnectionId, conversationId);
+        public ChatHub(AppDbContext dbContext)
+        {
+            _dbContext = dbContext;
         }
 
-        public async Task LeaveConversation(string conversationId)
+        public async Task JoinConversation(string conversationIdStr)
         {
-            await Groups.RemoveFromAsync(Context.ConnectionId, conversationId);
-        }
-
-        // Phương thức phát sự kiện ConversationChanged với đúng Payload chuẩn (Yêu cầu 6)
-        public async Task SendConversationChanged(string conversationId, string eventId, long latestSeq)
-        {
-            await Clients.Group(conversationId).SendAsync("ConversationChanged", new
+            if (!Guid.TryParse(conversationIdStr, out var conversationId))
             {
-                EventId = eventId,
-                ConversationId = conversationId,
-                LatestSeq = latestSeq
-            });
+                throw new HubException("Invalid conversation ID format.");
+            }
+
+            var userIdStr = Context.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                         ?? Context.User?.FindFirst("sub")?.Value;
+
+            if (string.IsNullOrEmpty(userIdStr) || !Guid.TryParse(userIdStr, out var userId))
+            {
+                throw new HubException("Unauthorized user.");
+            }
+
+            var isMember = await _dbContext.ConversationMembers
+                .AnyAsync(cm => cm.ConversationId == conversationId && cm.UserId == userId);
+
+            if (!isMember)
+            {
+                throw new HubException("You are not a member of this conversation.");
+            }
+
+            await Groups.AddToGroupAsync(Context.ConnectionId, conversationIdStr);
+        }
+
+        public async Task LeaveConversation(string conversationIdStr)
+        {
+            await Groups.RemoveFromGroupAsync(Context.ConnectionId, conversationIdStr);
         }
     }
 }
