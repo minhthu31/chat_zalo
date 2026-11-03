@@ -169,3 +169,6 @@ app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapControllers();
 
 app.Run();
+
+// Expose the existing entry point to HTTP integration tests.
+public partial class Program { }

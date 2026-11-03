@@ -63,6 +63,14 @@ public class ConversationService : IConversationService
         if (currentUserId == targetUserId)
             throw new UnauthorizedAccessException("DIRECT_CONVERSATION_NOT_ALLOWED");
 
+        var targetExists = await _dbContext.Users
+            .AsNoTracking()
+            .AnyAsync(u => u.Id == targetUserId);
+        if (!targetExists)
+        {
+            throw new KeyNotFoundException("NOT_FOUND");
+        }
+
         var (userLowId, userHighId) = NormaliseUserPair(currentUserId, targetUserId);
 
         // ---- Idempotent path: conversation already exists ----

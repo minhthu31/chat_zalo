@@ -238,6 +238,32 @@ public class ConversationServiceTests
     }
 
     // -----------------------------------------------------------------------
+    // Test 3d – target user does not exist (HTTP 404 NOT_FOUND)
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task CreateDirectAsync_WhenTargetUserDoesNotExist_ThrowsKeyNotFoundException()
+    {
+        var sfx = Guid.NewGuid().ToString("N")[..8];
+        var userA = MakeUser($"nf_a{sfx}");
+
+        await using (var setup = CreateDbContext())
+        {
+            setup.Users.Add(userA);
+            await setup.SaveChangesAsync();
+        }
+
+        await using var ctx = CreateDbContext();
+        var svc = new ConversationService(ctx, new FriendshipService(ctx), new BlockService(ctx));
+
+        var nonExistentTargetId = Guid.NewGuid();
+        var ex = await Assert.ThrowsAsync<KeyNotFoundException>(
+            () => svc.CreateDirectAsync(userA.Id, nonExistentTargetId));
+
+        Assert.Equal("NOT_FOUND", ex.Message);
+    }
+
+    // -----------------------------------------------------------------------
     // Test 4 – GetConversationsAsync only returns current user's conversations
     // -----------------------------------------------------------------------
 
@@ -270,4 +296,3 @@ public class ConversationServiceTests
         Assert.DoesNotContain(listB, c => c.Id == convIdA);
     }
 }
-

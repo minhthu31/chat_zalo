@@ -76,11 +76,19 @@ public class ConversationsController : ControllerBase
                 ? StatusCode(StatusCodes.Status201Created, dto)
                 : Ok(dto);
         }
-        catch (UnauthorizedAccessException ex) when (ex.Message == "DIRECT_CONVERSATION_NOT_ALLOWED")
+        catch (KeyNotFoundException)
+        {
+            return NotFound(new
+            {
+                code = "NOT_FOUND",
+                message = "Target user does not exist."
+            });
+        }
+        catch (UnauthorizedAccessException ex) when (ex.Message is "DIRECT_CONVERSATION_NOT_ALLOWED" or "CONVERSATION_ACCESS_DENIED")
         {
             return StatusCode(StatusCodes.Status403Forbidden, new AuthErrorResponse
             {
-                Code    = "DIRECT_CONVERSATION_NOT_ALLOWED",
+                Code    = ex.Message,
                 Message = "You are not allowed to create this conversation."
             });
         }
