@@ -121,6 +121,9 @@ builder.Services.AddCors(options =>
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IAccountGateway, IdentityAccountGateway>();
 
+// CHAT-3: Users API
+builder.Services.AddScoped<IUserService, UserService>();
+builder.Services.AddScoped<IUserAccountGateway, IdentityUserAccountGateway>();
 
 builder.Services.AddControllers();
 
@@ -165,29 +168,6 @@ if (app.Environment.IsDevelopment())
 }
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
-app.MapControllers();
-
-app.Run();
-
-
-
-
-builder.Services.AddOpenApi();
-
-
-
-if (app.Environment.IsDevelopment())
-{
-    app.MapOpenApi();
-}
-
-// 7. Cau hinh HTTP pipeline
-app.UseHttpsRedirection();
-app.UseHttpsRedirection();
-
-app.UseAuthentication();
-app.UseAuthorization();
-
 app.MapControllers();
 
 app.Run();

@@ -5,14 +5,13 @@ namespace Chat.Application.Interfaces;
 
 public interface IUserService
 {
-    Task<UserDto?> GetCurrentUserAsync(string userId);
+    Task<UserDto> GetProfileAsync(Guid userId);
 
-    Task<UserDto?> UpdateProfileAsync(
-        string userId,
+    Task<List<UserDto>> SearchAsync(string username);
+
+    Task<UserDto> UpdateProfileAsync(
+        Guid userId,
         UpdateProfileRequest request);
-
-    Task<IReadOnlyList<UserDto>> SearchUsersAsync(
-        string username);
 }
 
 /// <summary>

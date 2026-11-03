@@ -16,23 +16,38 @@ public sealed class UserService : IUserService
         _users = users;
     }
 
-    public Task<UserDto?> GetCurrentUserAsync(string userId)
+    public async Task<UserDto> GetProfileAsync(Guid userId)
     {
-        if (string.IsNullOrWhiteSpace(userId))
-            throw new ArgumentException("User ID is required.");
+        var user = await _users.FindByIdAsync(userId.ToString());
 
-        return _users.FindByIdAsync(userId);
+        return user ?? throw new KeyNotFoundException("User not found.");
     }
 
-    public Task<UserDto?> UpdateProfileAsync(
-        string userId,
+    public async Task<List<UserDto>> SearchAsync(string username)
+    {
+        if (string.IsNullOrWhiteSpace(username))
+        {
+            throw new ArgumentException("Username is required.");
+        }
+
+        var normalizedUsername = username.Trim();
+
+        if (normalizedUsername.Length > MaxUsernameLength)
+        {
+            throw new ArgumentException(
+                $"Username must not exceed {MaxUsernameLength} characters.");
+        }
+
+        var users = await _users.SearchByUsernameAsync(normalizedUsername);
+
+        return users.ToList();
+    }
+
+    public async Task<UserDto> UpdateProfileAsync(
+        Guid userId,
         UpdateProfileRequest request)
     {
-        if (string.IsNullOrWhiteSpace(userId))
-            throw new ArgumentException("User ID is required.");
-
-        if (request is null ||
-            string.IsNullOrWhiteSpace(request.DisplayName))
+        if (request is null || string.IsNullOrWhiteSpace(request.DisplayName))
         {
             throw new ArgumentException("DisplayName is required.");
         }
@@ -45,23 +60,10 @@ public sealed class UserService : IUserService
                 $"DisplayName must not exceed {MaxDisplayNameLength} characters.");
         }
 
-        return _users.UpdateDisplayNameAsync(userId, displayName);
-    }
+        var user = await _users.UpdateDisplayNameAsync(
+            userId.ToString(),
+            displayName);
 
-    public Task<IReadOnlyList<UserDto>> SearchUsersAsync(
-        string username)
-    {
-        if (string.IsNullOrWhiteSpace(username))
-            throw new ArgumentException("Username is required.");
-
-        var normalizedUsername = username.Trim();
-
-        if (normalizedUsername.Length > MaxUsernameLength)
-        {
-            throw new ArgumentException(
-                $"Username must not exceed {MaxUsernameLength} characters.");
-        }
-
-        return _users.SearchByUsernameAsync(normalizedUsername);
+        return user ?? throw new KeyNotFoundException("User not found.");
     }
 }

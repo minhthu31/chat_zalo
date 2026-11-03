@@ -1,8 +1,7 @@
-
 using System.Security.Claims;
+using Chat.Api.Filters;
 using Chat.Application.DTOs.Users;
 using Chat.Application.Interfaces;
-using Chat.Application.Services;
 using Chat.Infrastructure.Identity;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
@@ -18,53 +17,48 @@ public class UsersController : ControllerBase
 {
     private readonly IUserService _userService;
 
-    public UsersController(UserManager<ApplicationUser> userManager)
+    public UsersController(IUserService userService)
     {
-        _userService = new UserService(
-            new IdentityUserAccountGateway(userManager));
+        _userService = userService;
     }
 
     [HttpGet("me")]
     public async Task<IActionResult> GetCurrentUser()
     {
-        var userId = User.FindFirstValue(
-            ClaimTypes.NameIdentifier);
-
-        if (string.IsNullOrWhiteSpace(userId))
+        if (!TryGetCurrentUserId(out var userId))
         {
             return Unauthorized(new
             {
-                errorCode = "UNAUTHORIZED",
+                code = "UNAUTHORIZED",
                 message = "User is not authenticated."
             });
         }
 
-        var user = await _userService.GetCurrentUserAsync(userId);
-
-        if (user is null)
+        try
+        {
+            var user = await _userService.GetProfileAsync(userId);
+            return Ok(user);
+        }
+        catch (KeyNotFoundException)
         {
             return NotFound(new
             {
-                errorCode = "USER_NOT_FOUND",
+                code = "USER_NOT_FOUND",
                 message = "User not found."
             });
         }
-
-        return Ok(user);
     }
 
     [HttpPatch("me")]
+    [ValidateAntiforgeryJson]
     public async Task<IActionResult> UpdateProfile(
-        [FromBody] UpdateProfileRequest request)
+        [FromBody] UpdateProfileRequest? request)
     {
-        var userId = User.FindFirstValue(
-            ClaimTypes.NameIdentifier);
-
-        if (string.IsNullOrWhiteSpace(userId))
+        if (!TryGetCurrentUserId(out var userId))
         {
             return Unauthorized(new
             {
-                errorCode = "UNAUTHORIZED",
+                code = "UNAUTHORIZED",
                 message = "User is not authenticated."
             });
         }
@@ -72,25 +66,28 @@ public class UsersController : ControllerBase
         try
         {
             var user = await _userService.UpdateProfileAsync(
-                userId, request);
-
-            if (user is null)
-            {
-                return NotFound(new
-                {
-                    errorCode = "USER_NOT_FOUND",
-                    message = "User not found."
-                });
-            }
+                userId, request!);
 
             return Ok(user);
         }
-        catch (ArgumentException ex)
+        catch (ArgumentException ex) when (ex.GetType() == typeof(ArgumentException))
         {
+            var message = request is null || string.IsNullOrWhiteSpace(request.DisplayName)
+                ? "DisplayName is required."
+                : "DisplayName must not exceed 100 characters.";
+
             return BadRequest(new
             {
-                errorCode = "INVALID_DISPLAY_NAME",
-                message = ex.Message
+                code = "INVALID_DISPLAY_NAME",
+                message
+            });
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound(new
+            {
+                code = "USER_NOT_FOUND",
+                message = "User not found."
             });
         }
         catch (InvalidOperationException)
@@ -99,7 +96,7 @@ public class UsersController : ControllerBase
                 StatusCodes.Status500InternalServerError,
                 new
                 {
-                    errorCode = "PROFILE_UPDATE_FAILED",
+                    code = "PROFILE_UPDATE_FAILED",
                     message = "Could not update profile."
                 });
         }
@@ -113,24 +110,33 @@ public class UsersController : ControllerBase
         {
             return BadRequest(new
             {
-                errorCode = "USERNAME_REQUIRED",
+                code = "USERNAME_REQUIRED",
                 message = "Username is required."
             });
         }
 
         try
         {
-            var users = await _userService.SearchUsersAsync(username);
+            var users = await _userService.SearchAsync(username);
             return Ok(users);
         }
-        catch (ArgumentException ex)
+        catch (ArgumentException ex) when (ex.GetType() == typeof(ArgumentException))
         {
             return BadRequest(new
             {
-                errorCode = "INVALID_USERNAME",
-                message = ex.Message
+                code = "INVALID_USERNAME",
+                message = "Username must not exceed 100 characters."
             });
         }
+    }
+
+    private bool TryGetCurrentUserId(out Guid userId)
+    {
+        userId = Guid.Empty;
+        var value = User.FindFirstValue(
+            ClaimTypes.NameIdentifier);
+
+        return Guid.TryParse(value, out userId);
     }
 }
 
@@ -148,13 +154,11 @@ internal sealed class IdentityUserAccountGateway
     public async Task<UserDto?> FindByIdAsync(string userId)
     {
         var user = await _users.FindByIdAsync(userId);
-
         return user is null ? null : ToDto(user);
     }
 
     public async Task<UserDto?> UpdateDisplayNameAsync(
-        string userId,
-        string displayName)
+        string userId, string displayName)
     {
         var user = await _users.FindByIdAsync(userId);
 
@@ -177,13 +181,14 @@ internal sealed class IdentityUserAccountGateway
     public async Task<IReadOnlyList<UserDto>> SearchByUsernameAsync(
         string username)
     {
-        var pattern = $"%{EscapeLikePattern(username)}%";
+        var pattern = "%" + EscapeLikePattern(username) + "%";
 
         return await _users.Users
             .AsNoTracking()
             .Where(user =>
                 user.UserName != null &&
-                EF.Functions.ILike(user.UserName, pattern))
+                EF.Functions.ILike(
+                    user.UserName, pattern, "\\"))
             .OrderBy(user => user.UserName)
             .Take(20)
             .Select(user => new UserDto
