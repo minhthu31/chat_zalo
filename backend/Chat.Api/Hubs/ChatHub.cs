@@ -2,15 +2,16 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
+using Chat.Infrastructure.Data;
 
 namespace chat_zalo.Hubs
 {
     [Authorize]
     public class ChatHub : Hub
     {
-        private readonly AppDbContext _dbContext;
+        private readonly ChatDbContext _dbContext;
 
-        public ChatHub(AppDbContext dbContext)
+        public ChatHub(ChatDbContext dbContext)
         {
             _dbContext = dbContext;
         }
