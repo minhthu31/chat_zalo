@@ -193,7 +193,7 @@ internal sealed class IdentityUserAccountGateway
             .Take(20)
             .Select(user => new UserDto
             {
-                Id = user.Id.ToString(),
+                Id = user.Id,
                 Username = user.UserName!,
                 DisplayName = user.DisplayName
             })
@@ -204,7 +204,7 @@ internal sealed class IdentityUserAccountGateway
     {
         return new UserDto
         {
-            Id = user.Id.ToString(),
+            Id = user.Id,
             Username = user.UserName ?? string.Empty,
             DisplayName = user.DisplayName
         };

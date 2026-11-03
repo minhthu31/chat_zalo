@@ -2,7 +2,7 @@ namespace Chat.Application.DTOs.Users;
 
 public sealed class UserDto
 {
-    public string Id { get; set; } = string.Empty;
+    public Guid Id { get; set; }
 
     public string Username { get; set; } = string.Empty;
 
