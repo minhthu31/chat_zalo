@@ -16,13 +16,15 @@ public class BlocksPostgresTests
         var cs = Environment.GetEnvironmentVariable("CHAT_TEST_CONNECTION_STRING")
             ?? throw new InvalidOperationException("A verified PostgreSQL test connection is required.");
         var connection = new NpgsqlConnectionStringBuilder(cs);
-        if (!string.Equals(
-        connection.Database,
-        "chat_zalo_review",
-        StringComparison.OrdinalIgnoreCase))
+        var databaseName = connection.Database ?? string.Empty;
+        // Allow the dedicated database names documented by this repo (for
+        // example chat_zalo_test and chat_zalo_chat1_review_20261031), while
+        // refusing the development database named chat_zalo.
+        if (!databaseName.Contains("_test", StringComparison.OrdinalIgnoreCase)
+            && !databaseName.Contains("_review", StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException(
-                "Only chat_zalo_review database is allowed for testing.");
+                "Use a dedicated test database whose name contains _test or _review.");
         }
         return new ChatDbContext(new DbContextOptionsBuilder<ChatDbContext>().UseNpgsql(cs).Options);
     }
