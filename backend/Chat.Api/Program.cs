@@ -3,6 +3,8 @@ using Chat.Application.DTOs.Auth;
 using Chat.Application.Interfaces;
 using Chat.Application.Services;
 using Chat.Infrastructure.Data;
+using chat_zalo.Hubs;
+using chat_zalo.Services;
 using Chat.Infrastructure.Identity;
 using Humanizer.Configuration;
 using Microsoft.AspNetCore.Antiforgery;
@@ -148,7 +150,8 @@ builder.Services.Configure<Microsoft.AspNetCore.Mvc.ApiBehaviorOptions>(options 
 // OpenAPI chuẩn .NET 10
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddOpenApi();
-
+builder.Services.AddSignalR();
+builder.Services.AddScoped<IChatNotificationService, ChatNotificationService>();
 var app = builder.Build();
 
 // Middleware order: CORS -> Authentication -> Authorization
