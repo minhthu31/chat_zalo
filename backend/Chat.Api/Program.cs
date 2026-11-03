@@ -4,7 +4,7 @@ using Chat.Application.Interfaces;
 using Chat.Application.Services;
 using Chat.Infrastructure.Data;
 using Chat.Infrastructure.Identity;
-using Chat.Infrastructure.Repositories;
+using Chat.Application.Repositories;
 using Humanizer.Configuration;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
