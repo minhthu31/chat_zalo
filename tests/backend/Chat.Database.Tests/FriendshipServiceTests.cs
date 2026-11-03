@@ -126,6 +126,42 @@ public sealed class FriendshipServiceTests
         Assert.Equal(404, error.StatusCode);
     }
 
+
+    [Fact]
+    public async Task StaleRequestCannotChangeStatusAfterCancelAndResend()
+    {
+        var (sender, receiver) = NewPair();
+        var repository = new FakeFriendshipRepository(sender, receiver);
+        repository.Seed(sender, receiver, sender, "Pending");
+
+        // Keep a snapshot representing the first request generation.
+        var staleRequest = repository.Snapshot();
+        Assert.True(await repository.TryChangeStatusAsync(staleRequest, "Pending", "Cancelled"));
+
+        // A new request is created for the same pair and returns to Pending.
+        repository.Seed(sender, receiver, receiver, "Pending");
+
+        // The old request must not be able to accept/reject/cancel the new one.
+        Assert.False(await repository.TryChangeStatusAsync(staleRequest, "Pending", "Accepted"));
+        Assert.Equal("Pending", repository.Relationship!.Status);
+        Assert.Equal(receiver, repository.Relationship.RequesterUserId);
+    }
+
+    [Fact]
+    public async Task StaleRequestCannotReopenNewerRequestGeneration()
+    {
+        var (sender, receiver) = NewPair();
+        var repository = new FakeFriendshipRepository(sender, receiver);
+        repository.Seed(sender, receiver, sender, "Cancelled");
+        var staleSnapshot = repository.Snapshot();
+
+        repository.Seed(sender, receiver, receiver, "Cancelled");
+
+        Assert.False(await repository.TryReopenAsync(staleSnapshot, sender));
+        Assert.Equal("Cancelled", repository.Relationship!.Status);
+        Assert.Equal(receiver, repository.Relationship.RequesterUserId);
+    }
+
     private static (Guid Sender, Guid Receiver) NewPair()
     {
         var first = Guid.NewGuid();
@@ -154,6 +190,16 @@ public sealed class FriendshipServiceTests
                 CreatedAt = DateTimeOffset.UtcNow
             };
         }
+
+        public Friendship Snapshot() => new()
+        {
+            UserLowId = Relationship!.UserLowId,
+            UserHighId = Relationship.UserHighId,
+            RequesterUserId = Relationship.RequesterUserId,
+            Status = Relationship.Status,
+            CreatedAt = Relationship.CreatedAt,
+            UpdatedAt = Relationship.UpdatedAt
+        };
 
         public Task<bool> UserExistsAsync(Guid userId) => Task.FromResult(_users.Contains(userId));
 
@@ -185,7 +231,10 @@ public sealed class FriendshipServiceTests
 
         public Task<bool> TryReopenAsync(Friendship friendship, Guid requesterUserId)
         {
-            if (Relationship is null || Relationship.Status != friendship.Status)
+            if (Relationship is null
+                || Relationship.Status != friendship.Status
+                || Relationship.RequesterUserId != friendship.RequesterUserId
+                || Relationship.CreatedAt != friendship.CreatedAt)
                 return Task.FromResult(false);
             Relationship.RequesterUserId = requesterUserId;
             Relationship.Status = "Pending";
@@ -196,7 +245,10 @@ public sealed class FriendshipServiceTests
 
         public Task<bool> TryChangeStatusAsync(Friendship friendship, string expectedStatus, string newStatus)
         {
-            if (Relationship is null || Relationship.Status != expectedStatus)
+            if (Relationship is null
+                || Relationship.Status != expectedStatus
+                || Relationship.RequesterUserId != friendship.RequesterUserId
+                || Relationship.CreatedAt != friendship.CreatedAt)
                 return Task.FromResult(false);
             Relationship.Status = newStatus;
             Relationship.UpdatedAt = DateTimeOffset.UtcNow;

@@ -6,20 +6,20 @@
 
 ## 1. Các file đã triển khai
 
-| File                                                               | Trách nhiệm                                                                      |
-| ------------------------------------------------------------------ | -------------------------------------------------------------------------------- |
-| `backend/Chat.Api/Controllers/FriendshipsController.cs`            | 6 HTTP endpoints, `[Authorize]`, lấy user hiện tại từ Claims, chuẩn hóa lỗi JSON |
-| `backend/Chat.Application/DTOs/Friendships/FriendRequestDto.cs`    | Body `targetUserId`                                                              |
-| `backend/Chat.Application/DTOs/Friendships/FriendshipDto.cs`       | DTO bạn bè/lời mời; thêm `FriendshipRequestsDto` cho incoming/outgoing           |
-| `backend/Chat.Application/Interfaces/IFriendshipService.cs`        | Giữ nguyên 5 chữ ký đã chốt trong contract v1.2                                  |
-| `backend/Chat.Application/Interfaces/IFriendshipQueryService.cs`   | Interface truy vấn GET, tách khỏi interface nghiệp vụ đã chốt                    |
-| `backend/Chat.Application/Services/FriendshipService.cs`           | Quy tắc nghiệp vụ, phân quyền, trạng thái, chống gửi trùng                       |
-| `backend/Chat.Application/Services/FriendshipException.cs`         | Business error code + HTTP status                                                |
-| `backend/Chat.Application/Interfaces/IFriendshipRepository.cs`     | Persistence abstraction để Application không phụ thuộc EF/Infrastructure         |
-| `backend/Chat.Infrastructure/Repositories/FriendshipRepository.cs` | EF Core/PostgreSQL queries, insert chống race, chuyển trạng thái nguyên tử       |
-| `backend/Chat.Api/Program.cs`                                      | Đăng ký DI service và repository                                                 |
-| `tests/backend/Chat.Database.Tests/FriendshipServiceTests.cs`      | Unit tests cho các nhánh nghiệp vụ                                               |
-| `docs/API_CONTRACT.md`                                             | Bổ sung bảng mã lỗi Friendships, không đổi endpoint/DTO contract                 |
+| File                                                               | Trách nhiệm                                                                                               |
+| ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------- |
+| `backend/Chat.Api/Controllers/FriendshipsController.cs`            | 6 HTTP endpoints, `[Authorize]`, lấy user hiện tại từ Claims, chuẩn hóa lỗi JSON                          |
+| `backend/Chat.Application/DTOs/Friendships/FriendRequestDto.cs`    | Body `targetUserId`                                                                                       |
+| `backend/Chat.Application/DTOs/Friendships/FriendshipDto.cs`       | DTO bạn bè/lời mời; thêm `FriendshipRequestsDto` cho incoming/outgoing                                    |
+| `backend/Chat.Application/Interfaces/IFriendshipService.cs`        | Giữ nguyên 5 chữ ký đã chốt trong contract v1.2                                                           |
+| `backend/Chat.Application/Interfaces/IFriendshipQueryService.cs`   | Interface truy vấn GET, tách khỏi interface nghiệp vụ đã chốt                                             |
+| `backend/Chat.Application/Services/FriendshipService.cs`           | Quy tắc nghiệp vụ, phân quyền, trạng thái, chống gửi trùng                                                |
+| `backend/Chat.Application/Services/FriendshipException.cs`         | Business error code + HTTP status                                                                         |
+| `backend/Chat.Application/Interfaces/IFriendshipRepository.cs`     | Persistence abstraction để Application không phụ thuộc EF/Infrastructure                                  |
+| `backend/Chat.Infrastructure/Repositories/FriendshipRepository.cs` | EF Core/PostgreSQL queries, insert chống race, chuyển trạng thái nguyên tử và kiểm tra generation lời mời |
+| `backend/Chat.Api/Program.cs`                                      | Đăng ký DI service và repository                                                                          |
+| `tests/backend/Chat.Database.Tests/FriendshipServiceTests.cs`      | Unit tests cho các nhánh nghiệp vụ                                                                        |
+| `docs/API_CONTRACT.md`                                             | Bổ sung bảng mã lỗi Friendships, không đổi endpoint/DTO contract                                          |
 
 Không sửa `Friendship` entity, `FriendshipConfiguration`, `ChatDbContext` hoặc migration vì schema hiện tại đã đáp ứng nghiệp vụ.
 
@@ -54,7 +54,18 @@ Database có khóa chính kép `(UserLowId, UserHighId)` và CHECK `UserLowId < 
 - `Rejected`/`Cancelled`: không hủy lại.
 - Không xóa hàng vật lý; giữ lịch sử trạng thái và bảo toàn invariant một cặp một hàng.
 
-### 2.5 Kiểm tra quyền chat
+### 2.5 Chống cập nhật nhầm request cũ (optimistic concurrency)
+
+Mỗi lần tạo lại lời mời sau `Rejected`/`Cancelled`, repository cập nhật `RequesterUserId` và `CreatedAt`. Hai thao tác `TryReopenAsync` và `TryChangeStatusAsync` dùng UPDATE có điều kiện đồng thời trên:
+
+- `UserLowId`, `UserHighId`;
+- trạng thái mong đợi;
+- `RequesterUserId` của snapshot đã đọc;
+- `CreatedAt` của đúng thế hệ lời mời.
+
+Do đó request cũ không thể cập nhật một lời mời mới chỉ vì cặp người dùng và trạng thái tình cờ giống nhau (ví dụ Pending → Cancelled → Pending). UPDATE phải tác động đúng một hàng; nếu không, service trả lỗi xung đột 409.
+
+### 2.6 Kiểm tra quyền chat
 
 `AreFriendsAsync(userAId, userBId)` trả `true` khi và chỉ khi tồn tại hàng của cặp chuẩn hóa có `Status == "Accepted"`. Hàm trả false với Guid rỗng, cùng một user, Pending, Rejected hoặc Cancelled.
 
@@ -312,22 +323,25 @@ Invoke-RestMethod `
 
 ## 6. Test và giới hạn xác minh
 
-Unit tests đã thêm vào `FriendshipServiceTests.cs`, bao gồm:
+### Unit tests hiện có
 
-- Không cho tự gửi lời mời.
-- Không cho tạo lời mời Pending trùng.
-- Chỉ người nhận được chấp nhận.
-- Accept làm `AreFriendsAsync` đúng ở cả hai chiều.
-- Reject không tạo quan hệ bạn bè.
-- Chỉ người gửi được hủy lời mời Pending.
-
-Chạy riêng unit tests cho Friendship (không cần PostgreSQL):
+`FriendshipServiceTests.cs` kiểm tra các nhánh nghiệp vụ service, bao gồm tự kết bạn, lời mời trùng, phân quyền accept, accept/reject, hủy lời mời, mở lại quan hệ và request generation cũ. `FriendshipsApiTests.cs` kiểm tra đủ 6 route, cookie xác thực, CSRF thiếu/sai/hợp lệ, Claim identity, status code và DI. Chạy:
 
 ```powershell
-dotnet test tests/backend/Chat.Database.Tests/Chat.Database.Tests.csproj --filter FullyQualifiedName~FriendshipServiceTests
+dotnet test tests/backend/Chat.Database.Tests/Chat.Database.Tests.csproj --filter FullyQualifiedName~Friendship
 ```
 
-Chạy toàn bộ test:
+### Build và toàn bộ test
+
+```powershell
+dotnet restore backend/Chat.sln
+dotnet build backend/Chat.sln
+dotnet test backend/Chat.sln
+```
+
+### PostgreSQL 18 test database
+
+Tạo database riêng, không dùng database có dữ liệu phát triển:
 
 ```powershell
 $env:CHAT_TEST_CONNECTION_STRING = "Host=localhost;Port=5432;Database=chat_zalo_test;Username=chat_zalo;Password=YOUR_LOCAL_PASSWORD"
@@ -335,9 +349,7 @@ dotnet ef database update --project backend/Chat.Infrastructure --startup-projec
 dotnet test tests/backend/Chat.Database.Tests/Chat.Database.Tests.csproj
 ```
 
-Các test database hiện có yêu cầu `CHAT_TEST_CONNECTION_STRING` trỏ tới database test riêng đã migrate. Không trỏ test vào database có dữ liệu quan trọng.
-
-**Giới hạn xác minh của bản bàn giao:** môi trường tạo bản sửa không có .NET SDK (`dotnet` command không tồn tại), nên chưa thể chạy `dotnet build` hoặc `dotnet test` tại đây. Cần chạy hai lệnh trên máy Windows có .NET 10 trước khi tạo PR. Không được đánh dấu Build/Test Passed khi chưa chạy thực tế.
+**Trạng thái xác minh của bản sửa này:** môi trường hiện tại không có .NET SDK hoặc PostgreSQL runtime, nên chưa thể thực thi `dotnet build`, `dotnet test`, HTTP integration tests hoặc PostgreSQL 18 concurrency tests. Không được xem các hạng mục đó là PASS cho đến khi chạy trên máy phát triển/CI có .NET 10 và PostgreSQL 18. HTTP integration tests dùng fake application service để kiểm tra pipeline Cookie/CSRF/controller và DI; chúng không thay thế PostgreSQL repository/concurrency integration tests thật. Các test PostgreSQL 18 thật vẫn chưa được xác minh.
 
 ## 7. Git branch và Pull Request
 
@@ -345,14 +357,14 @@ Từ thư mục gốc:
 
 ```powershell
 git status
-git switch -c feature/CHAT-friendships
+git switch feature/CHAT-4-friendships
 git add backend/Chat.Api/Controllers/FriendshipsController.cs backend/Chat.Api/Program.cs backend/Chat.Application/DTOs/Friendships backend/Chat.Application/Interfaces/IFriendshipService.cs backend/Chat.Application/Interfaces/IFriendshipRepository.cs backend/Chat.Application/Services/FriendshipService.cs backend/Chat.Application/Services/FriendshipException.cs backend/Chat.Infrastructure/Repositories/FriendshipRepository.cs tests/backend/Chat.Database.Tests docs/API_CONTRACT.md docs/FRIENDSHIPS_IMPLEMENTATION.md
 git diff --cached
 git commit -m "feat(friendships): implement friend request workflows"
-git push -u origin feature/CHAT-friendships
+git push -u origin feature/CHAT-4-friendships
 ```
 
-Sau khi push, tạo Pull Request theo `docs/GIT_RULES.md`, target branch theo quy định hiện tại của nhóm (không tự chọn `main` nếu nhóm đang yêu cầu `develop`). PR cần nêu: 6 endpoints, error codes, test cases, build result và xác nhận không đổi schema.
+Sau khi push, tạo Pull Request theo `docs/GIT_RULES.md`, target branch là `main` theo yêu cầu Leader; không tự merge. PR cần nêu: 6 endpoints, error codes, test cases, build result và xác nhận không đổi schema.
 
 ## 8. Checklist nghiệm thu
 
@@ -369,5 +381,5 @@ Sau khi push, tạo Pull Request theo `docs/GIT_RULES.md`, target branch theo qu
 - [ ] `AreFriendsAsync` chỉ true khi Accepted.
 - [ ] Không sửa schema/migration ngoài phạm vi.
 - [ ] `dotnet build` thành công.
-- [ ] `dotnet test` thành công.
+- [ ] Unit tests, HTTP integration tests và PostgreSQL 18 concurrency tests chạy thành công (hiện chưa được xác minh).
 - [ ] Push branch và tạo PR để Leader review.

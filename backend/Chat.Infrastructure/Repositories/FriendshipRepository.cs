@@ -5,7 +5,7 @@ using Chat.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 
-namespace Chat.Infrastructure.Repositories;
+namespace Chat.Application.Repositories;
 
 /// <summary>EF Core/PostgreSQL persistence adapter for friendship use cases.</summary>
 public sealed class FriendshipRepository : IFriendshipRepository
@@ -131,6 +131,8 @@ public sealed class FriendshipRepository : IFriendshipRepository
             .Where(item => item.UserLowId == friendship.UserLowId
                            && item.UserHighId == friendship.UserHighId
                            && item.Status == friendship.Status
+                           && item.RequesterUserId == friendship.RequesterUserId
+                           && item.CreatedAt == friendship.CreatedAt
                            && (item.Status == "Rejected" || item.Status == "Cancelled"))
             .ExecuteUpdateAsync(update => update
                 .SetProperty(item => item.RequesterUserId, requesterUserId)
@@ -147,7 +149,11 @@ public sealed class FriendshipRepository : IFriendshipRepository
         var affected = await _db.Friendships
             .Where(item => item.UserLowId == friendship.UserLowId
                            && item.UserHighId == friendship.UserHighId
-                           && item.Status == expectedStatus)
+                           && item.Status == expectedStatus
+                           // Compare the exact request generation, not just the pair/status.
+                           // A cancelled request may have been reopened as a new Pending request.
+                           && item.RequesterUserId == friendship.RequesterUserId
+                           && item.CreatedAt == friendship.CreatedAt)
             .ExecuteUpdateAsync(update => update
                 .SetProperty(item => item.Status, newStatus)
                 .SetProperty(item => item.UpdatedAt, DateTimeOffset.UtcNow));

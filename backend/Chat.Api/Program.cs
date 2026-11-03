@@ -4,6 +4,7 @@ using Chat.Application.Interfaces;
 using Chat.Application.Services;
 using Chat.Infrastructure.Data;
 using Chat.Infrastructure.Identity;
+using Chat.Infrastructure.Repositories;
 using Humanizer.Configuration;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
@@ -120,6 +121,10 @@ builder.Services.AddCors(options =>
 // S1-02 application abstractions
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IBlockService, BlockService>();
+builder.Services.AddScoped<FriendshipService>();
+builder.Services.AddScoped<IFriendshipService>(sp => sp.GetRequiredService<FriendshipService>());
+builder.Services.AddScoped<IFriendshipQueryService>(sp => sp.GetRequiredService<FriendshipService>());
+builder.Services.AddScoped<IFriendshipRepository, FriendshipRepository>();
 builder.Services.AddScoped<IAccountGateway, IdentityAccountGateway>();
 
 
