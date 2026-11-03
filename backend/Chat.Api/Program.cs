@@ -1,4 +1,4 @@
-﻿using Chat.Api.Controllers;
+using Chat.Api.Controllers;
 using Chat.Application.DTOs.Auth;
 using Chat.Application.Interfaces;
 using Chat.Application.Services;
@@ -119,6 +119,7 @@ builder.Services.AddCors(options =>
 
 // S1-02 application abstractions
 builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.AddScoped<IBlockService, BlockService>();
 builder.Services.AddScoped<IAccountGateway, IdentityAccountGateway>();
 
 
@@ -165,3 +166,6 @@ app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapControllers();
 
 app.Run();
+
+// Expose the existing entry point to HTTP integration tests.
+public partial class Program { }
