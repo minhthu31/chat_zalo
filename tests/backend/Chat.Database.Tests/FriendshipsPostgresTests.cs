@@ -2,6 +2,8 @@ using Chat.Application.Services;
 using Chat.Infrastructure.Data;
 using Chat.Infrastructure.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using System.Data.Common;
 using Npgsql;
 using Xunit;
 
@@ -11,15 +13,20 @@ namespace Chat.Database.Tests;
 // only to a dedicated *_test or *_review database; never targets chat_zalo.
 public sealed class FriendshipsPostgresTests
 {
-    private static ChatDbContext CreateContext()
+    private static ChatDbContext CreateContext(params IInterceptor[] interceptors)
     {
         var connectionString = Environment.GetEnvironmentVariable("CHAT_TEST_CONNECTION_STRING")
             ?? throw new InvalidOperationException("Set CHAT_TEST_CONNECTION_STRING to a dedicated PostgreSQL test database.");
         var parsed = new NpgsqlConnectionStringBuilder(connectionString);
-        if (!parsed.Database.Contains("_test", StringComparison.OrdinalIgnoreCase)
-            && !parsed.Database.Contains("_review", StringComparison.OrdinalIgnoreCase))
+        var databaseName = parsed.Database ?? string.Empty;
+        if (!databaseName.Contains("_test", StringComparison.OrdinalIgnoreCase)
+            && !databaseName.Contains("_review", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("The test database name must contain _test or _review.");
-        return new ChatDbContext(new DbContextOptionsBuilder<ChatDbContext>().UseNpgsql(connectionString).Options);
+
+        var options = new DbContextOptionsBuilder<ChatDbContext>().UseNpgsql(connectionString);
+        if (interceptors.Length > 0)
+            options.AddInterceptors(interceptors);
+        return new ChatDbContext(options.Options);
     }
 
     [Fact]
@@ -160,10 +167,10 @@ public sealed class FriendshipsPostgresTests
     }
 
     [Fact]
-    public async Task ConcurrentAcceptAndRemove_FromIndependentContexts_DoNotOverwriteEachOther()
+    public async Task AcceptThenRemove_FromIndependentContexts_BothSucceedAndFinalStatusIsCancelled()
     {
-        var alice = NewUser("alice_remove_race");
-        var bob = NewUser("bob_remove_race");
+        var alice = NewUser("alice_accept_remove");
+        var bob = NewUser("bob_accept_remove");
 
         await using (var setup = CreateContext())
         {
@@ -174,39 +181,22 @@ public sealed class FriendshipsPostgresTests
 
         try
         {
-            var start = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            // Preserve the actual business ordering: recipient accepts first, then
+            // either participant removes the now-accepted friendship. Both are valid.
+            await using (var acceptContext = CreateContext())
+                await new FriendshipService(acceptContext).AcceptAsync(bob.Id, alice.Id);
 
-            async Task<bool> RunAsync(Func<FriendshipService, Task> operation)
-            {
-                await using var independentContext = CreateContext();
-                var service = new FriendshipService(independentContext);
-                await start.Task;
-                try
-                {
-                    await operation(service);
-                    return true;
-                }
-                catch (FriendshipException)
-                {
-                    return false;
-                }
-            }
-
-            var accept = RunAsync(service => service.AcceptAsync(bob.Id, alice.Id));
-            var remove = RunAsync(service => service.RemoveAsync(alice.Id, bob.Id));
-            start.SetResult(true);
-
-            var outcomes = await Task.WhenAll(accept, remove);
-            Assert.Single(outcomes, succeeded => succeeded);
+            await using (var removeContext = CreateContext())
+                await new FriendshipService(removeContext).RemoveAsync(alice.Id, bob.Id);
 
             await using var verify = CreateContext();
-            var low = alice.Id.CompareTo(bob.Id) < 0 ? alice.Id : bob.Id;
-            var high = alice.Id.CompareTo(bob.Id) < 0 ? bob.Id : alice.Id;
+            var (low, high) = Normalize(alice.Id, bob.Id);
             var finalStatus = await verify.Friendships
                 .Where(x => x.UserLowId == low && x.UserHighId == high)
                 .Select(x => x.Status)
                 .SingleAsync();
-            Assert.Contains(finalStatus, new[] { "Accepted", "Cancelled" });
+
+            Assert.Equal("Cancelled", finalStatus);
         }
         finally
         {
@@ -216,6 +206,120 @@ public sealed class FriendshipsPostgresTests
                          || (x.UserLowId == bob.Id && x.UserHighId == alice.Id))
                 .ExecuteDeleteAsync();
             await cleanup.Users.Where(x => x.Id == alice.Id || x.Id == bob.Id).ExecuteDeleteAsync();
+        }
+    }
+
+    [Theory]
+    [InlineData("Accept")]
+    [InlineData("Reject")]
+    [InlineData("Remove")]
+    public async Task StaleOperation_CannotAffectCancelledAndResentRequest(string operationName)
+    {
+        var alice = NewUser($"alice_stale_{operationName.ToLowerInvariant()}");
+        var bob = NewUser($"bob_stale_{operationName.ToLowerInvariant()}");
+
+        await using (var setup = CreateContext())
+        {
+            await setup.Users.AddRangeAsync(alice, bob);
+            await setup.SaveChangesAsync();
+            await new FriendshipService(setup).SendRequestAsync(alice.Id, bob.Id);
+        }
+
+        var gate = new PauseAfterFriendshipSnapshotInterceptor();
+        Task? staleOperation = null;
+        try
+        {
+            await using var staleContext = CreateContext(gate);
+            var staleService = new FriendshipService(staleContext);
+            staleOperation = operationName switch
+            {
+                "Accept" => staleService.AcceptAsync(bob.Id, alice.Id),
+                "Reject" => staleService.RejectAsync(bob.Id, alice.Id),
+                "Remove" => staleService.RemoveAsync(alice.Id, bob.Id),
+                _ => throw new ArgumentOutOfRangeException(nameof(operationName))
+            };
+
+            // Pause after PostgreSQL returned the old request snapshot but before
+            // the service can acquire FOR UPDATE.
+            await gate.SnapshotRead.WaitAsync(TimeSpan.FromSeconds(15));
+
+            DateTimeOffset replacementVersion;
+            await using (var replacementContext = CreateContext())
+            {
+                var replacementService = new FriendshipService(replacementContext);
+                await replacementService.RemoveAsync(alice.Id, bob.Id);
+                await replacementService.SendRequestAsync(alice.Id, bob.Id);
+
+                var (low, high) = Normalize(alice.Id, bob.Id);
+                replacementVersion = await replacementContext.Friendships
+                    .Where(x => x.UserLowId == low && x.UserHighId == high)
+                    .Select(x => x.CreatedAt)
+                    .SingleAsync();
+            }
+
+            gate.Continue();
+            var staleError = await Assert.ThrowsAsync<FriendshipException>(() => staleOperation!);
+            Assert.Equal(409, staleError.StatusCode);
+            Assert.Contains("STATE_CONFLICT", staleError.Code, StringComparison.Ordinal);
+
+            await using var verify = CreateContext();
+            var (verifyLow, verifyHigh) = Normalize(alice.Id, bob.Id);
+            var current = await verify.Friendships
+                .Where(x => x.UserLowId == verifyLow && x.UserHighId == verifyHigh)
+                .SingleAsync();
+
+            Assert.Equal("Pending", current.Status);
+            Assert.Equal(alice.Id, current.RequesterUserId);
+            Assert.Equal(replacementVersion, current.CreatedAt);
+        }
+        finally
+        {
+            gate.Continue();
+            if (staleOperation is not null)
+            {
+                try { await staleOperation; }
+                catch (FriendshipException) { }
+            }
+            await using var cleanup = CreateContext();
+            await cleanup.Friendships
+                .Where(x => (x.UserLowId == alice.Id && x.UserHighId == bob.Id)
+                         || (x.UserLowId == bob.Id && x.UserHighId == alice.Id))
+                .ExecuteDeleteAsync();
+            await cleanup.Users.Where(x => x.Id == alice.Id || x.Id == bob.Id).ExecuteDeleteAsync();
+        }
+    }
+
+    private static (Guid Low, Guid High) Normalize(Guid a, Guid b) =>
+        a.CompareTo(b) < 0 ? (a, b) : (b, a);
+
+    private sealed class PauseAfterFriendshipSnapshotInterceptor : DbCommandInterceptor
+    {
+        private int _paused;
+        private readonly TaskCompletionSource _snapshotRead =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _continue =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task SnapshotRead => _snapshotRead.Task;
+
+        public void Continue() => _continue.TrySetResult();
+
+        public override async ValueTask<DbDataReader> ReaderExecutedAsync(
+            DbCommand command,
+            CommandExecutedEventData eventData,
+            DbDataReader result,
+            CancellationToken cancellationToken = default)
+        {
+            var sql = command.CommandText;
+            if (sql.Contains("\"Friendships\"", StringComparison.Ordinal)
+                && !sql.Contains("FOR UPDATE", StringComparison.OrdinalIgnoreCase)
+                && Interlocked.Exchange(ref _paused, 1) == 0)
+            {
+                _snapshotRead.TrySetResult();
+                await _continue.Task.WaitAsync(cancellationToken);
+            }
+
+            return result;
         }
     }
 

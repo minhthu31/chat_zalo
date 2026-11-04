@@ -29,7 +29,12 @@ public sealed class FriendshipService(ChatDbContext db) : IFriendshipService
 
             // Conditional UPDATE makes re-opening a terminal pair atomic: two concurrent
             // senders cannot both turn the same Rejected/Cancelled row into Pending.
+            // CreatedAt is the request-version token (schema/API remain unchanged).
+            // PostgreSQL timestamps have microsecond precision, so guarantee a distinct
+            // value even when a request is cancelled and re-sent within the same tick.
             var now = DateTimeOffset.UtcNow;
+            if (now - relationship.CreatedAt < TimeSpan.FromTicks(10))
+                now = relationship.CreatedAt.AddTicks(10);
             var changed = await db.Friendships
                 .Where(x => x.UserLowId == low && x.UserHighId == high &&
                             (x.Status == "Rejected" || x.Status == "Cancelled"))
@@ -89,19 +94,28 @@ public sealed class FriendshipService(ChatDbContext db) : IFriendshipService
         ValidateDistinctUsers(currentUserId, requesterUserId);
         var (low, high) = Normalize(currentUserId, requesterUserId);
 
-        // Lock the canonical pair before reading it. Under PostgreSQL READ COMMITTED,
-        // SELECT ... FOR UPDATE waits for a concurrent writer and then returns the
-        // committed row version. This serializes accept/reject against cancel/re-send
-        // without adding a column or changing the API contract.
-        await using var transaction = await db.Database.BeginTransactionAsync();
-        var relationship = await LoadForUpdateAsync(low, high)
+        // Capture the request version before waiting for the row lock. If the old
+        // request is cancelled and re-sent while this operation is waiting, the
+        // locked row will have a different CreatedAt and this operation must not
+        // transition the new request.
+        var observed = await db.Friendships.AsNoTracking()
+            .SingleOrDefaultAsync(x => x.UserLowId == low && x.UserHighId == high)
             ?? throw Error(404, "FRIENDSHIP_NOT_FOUND", "Friend request or friendship was not found.");
-        EnsurePendingIncoming(relationship, currentUserId, requesterUserId);
+        EnsurePendingIncoming(observed, currentUserId, requesterUserId);
+
+        await using var transaction = await db.Database.BeginTransactionAsync();
+        var locked = await LoadForUpdateAsync(low, high)
+            ?? throw Error(404, "FRIENDSHIP_NOT_FOUND", "Friend request or friendship was not found.");
+
+        if (locked.CreatedAt != observed.CreatedAt)
+            throw Error(409, "FRIEND_REQUEST_STATE_CONFLICT", "The friend request was replaced while it was being processed.");
+
+        EnsurePendingIncoming(locked, currentUserId, requesterUserId);
 
         var changed = await db.Friendships
             .Where(x => x.UserLowId == low && x.UserHighId == high &&
                         x.Status == "Pending" && x.RequesterUserId == requesterUserId &&
-                        x.CreatedAt == relationship.CreatedAt)
+                        x.CreatedAt == observed.CreatedAt)
             .ExecuteUpdateAsync(update => update
                 .SetProperty(x => x.Status, nextStatus)
                 .SetProperty(x => x.UpdatedAt, DateTimeOffset.UtcNow));
@@ -116,22 +130,31 @@ public sealed class FriendshipService(ChatDbContext db) : IFriendshipService
         ValidateDistinctUsers(currentUserId, targetUserId);
         var (low, high) = Normalize(currentUserId, targetUserId);
 
-        // Use the same row lock as Accept/Reject so a remove cannot act on a stale
-        // snapshot while another transaction cancels and re-opens this pair.
-        await using var transaction = await db.Database.BeginTransactionAsync();
-        var relationship = await LoadForUpdateAsync(low, high)
+        // Read the version at invocation time, before acquiring the row lock.
+        // A delayed Remove for an old request must never cancel a re-sent request.
+        var observed = await db.Friendships.AsNoTracking()
+            .SingleOrDefaultAsync(x => x.UserLowId == low && x.UserHighId == high)
             ?? throw Error(404, "FRIENDSHIP_NOT_FOUND", "No active friend request or friendship exists.");
 
-        if (relationship.Status == "Pending" && relationship.RequesterUserId != currentUserId)
+        await using var transaction = await db.Database.BeginTransactionAsync();
+        var locked = await LoadForUpdateAsync(low, high)
+            ?? throw Error(404, "FRIENDSHIP_NOT_FOUND", "No active friend request or friendship exists.");
+
+        if (locked.CreatedAt != observed.CreatedAt)
+            throw Error(409, "FRIENDSHIP_STATE_CONFLICT", "The friendship request was replaced while it was being removed.");
+
+        if (locked.Status == "Pending" && locked.RequesterUserId != currentUserId)
             throw Error(403, "FRIEND_REQUEST_SENDER_ONLY", "Only the sender can cancel an outgoing friend request.");
-        if (relationship.Status != "Pending" && relationship.Status != "Accepted")
+        if (locked.Status != "Pending" && locked.Status != "Accepted")
             throw Error(404, "FRIENDSHIP_NOT_FOUND", "No active friend request or friendship exists.");
 
-        var expectedStatus = relationship.Status;
+        // An Accept may commit after our initial snapshot. If it is the same
+        // request version, Remove is still valid and removes the accepted friendship.
+        var expectedStatus = locked.Status;
         var changed = await db.Friendships
             .Where(x => x.UserLowId == low && x.UserHighId == high &&
                         x.Status == expectedStatus &&
-                        x.CreatedAt == relationship.CreatedAt &&
+                        x.CreatedAt == observed.CreatedAt &&
                         (expectedStatus != "Pending" || x.RequesterUserId == currentUserId))
             .ExecuteUpdateAsync(update => update
                 .SetProperty(x => x.Status, "Cancelled")
