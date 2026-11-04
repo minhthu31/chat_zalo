@@ -23,127 +23,136 @@ public class ConversationService : IConversationService
         _blockService = blockService;
     }
 
-    // -----------------------------------------------------------------------
-    // Helpers
-    // -----------------------------------------------------------------------
-
-    /// <summary>
-    /// Normalises two user IDs so that userLowId &lt; userHighId using ordinal
-    /// "D"-format GUID string comparison — matches the DB constraint
-    /// CK_DirectConversations_UserOrder ("UserLowId" &lt; "UserHighId").
-    /// </summary>
-    private static (Guid low, Guid high) NormaliseUserPair(Guid u1, Guid u2)
-        => string.Compare(u1.ToString("D"), u2.ToString("D"),
-               StringComparison.OrdinalIgnoreCase) < 0
-           ? (u1, u2)
-           : (u2, u1);
+    private static (Guid low, Guid high) NormaliseUserPair(
+        Guid first,
+        Guid second)
+    {
+        return string.Compare(
+            first.ToString("D"),
+            second.ToString("D"),
+            StringComparison.OrdinalIgnoreCase) < 0
+                ? (first, second)
+                : (second, first);
+    }
 
     private static ConversationDto ToDto(
-        Conversation conv,
+        Conversation conversation,
         bool isNewlyCreated = false)
-        => new()
-        {
-            Id             = conv.Id,
-            Kind           = conv.Kind,
-            LastMessageSeq = conv.LastMessageSeq,
-            IsNewlyCreated = isNewlyCreated,
-        };
-
-    // -----------------------------------------------------------------------
-    // CreateDirectAsync
-    // -----------------------------------------------------------------------
-
-    public async Task<ConversationDto> CreateDirectAsync(Guid currentUserId, Guid targetUserId)
     {
-        // Basic guard: both IDs must be valid
+        return new ConversationDto
+        {
+            Id = conversation.Id,
+            Kind = conversation.Kind,
+            LastMessageSeq = conversation.LastMessageSeq,
+            IsNewlyCreated = isNewlyCreated
+        };
+    }
+
+    public async Task<ConversationDto> CreateDirectAsync(
+        Guid currentUserId,
+        Guid targetUserId)
+    {
         if (currentUserId == Guid.Empty || targetUserId == Guid.Empty)
             throw new ArgumentException("User IDs must not be empty.");
 
-        // Cannot chat with yourself
         if (currentUserId == targetUserId)
-            throw new UnauthorizedAccessException("DIRECT_CONVERSATION_NOT_ALLOWED");
+        {
+            throw new UnauthorizedAccessException(
+                "DIRECT_CONVERSATION_NOT_ALLOWED");
+        }
 
         var targetExists = await _dbContext.Users
             .AsNoTracking()
-            .AnyAsync(u => u.Id == targetUserId);
+            .AnyAsync(user => user.Id == targetUserId);
+
         if (!targetExists)
-        {
             throw new KeyNotFoundException("NOT_FOUND");
-        }
 
-        var (userLowId, userHighId) = NormaliseUserPair(currentUserId, targetUserId);
+        var (userLowId, userHighId) =
+            NormaliseUserPair(currentUserId, targetUserId);
 
-        // ---- Idempotent path: conversation already exists ----
         var existing = await _dbContext.DirectConversations
-            .FirstOrDefaultAsync(dc => dc.UserLowId == userLowId && dc.UserHighId == userHighId);
+            .FirstOrDefaultAsync(direct =>
+                direct.UserLowId == userLowId &&
+                direct.UserHighId == userHighId);
 
         if (existing is not null)
         {
-            return await GetExistingAsync(existing.ConversationId, currentUserId, targetUserId);
+            return await GetExistingAsync(
+                existing.ConversationId,
+                currentUserId,
+                targetUserId);
         }
 
-        // ---- New conversation path ----
+        if (await _blockService.IsBlockedAsync(
+                currentUserId,
+                targetUserId))
+        {
+            throw new UnauthorizedAccessException(
+                "DIRECT_CONVERSATION_NOT_ALLOWED");
+        }
 
-        // Block check (bidirectional: either party blocked the other)
-        if (await _blockService.IsBlockedAsync(currentUserId, targetUserId))
-            throw new UnauthorizedAccessException("DIRECT_CONVERSATION_NOT_ALLOWED");
+        if (!await _friendshipService.AreFriendsAsync(
+                currentUserId,
+                targetUserId))
+        {
+            throw new UnauthorizedAccessException(
+                "DIRECT_CONVERSATION_NOT_ALLOWED");
+        }
 
-        // Friendship check
-        if (!await _friendshipService.AreFriendsAsync(currentUserId, targetUserId))
-            throw new UnauthorizedAccessException("DIRECT_CONVERSATION_NOT_ALLOWED");
+        await using var transaction =
+            await _dbContext.Database.BeginTransactionAsync();
 
-        // ---- Create inside a transaction ----
-        await using var tx = await _dbContext.Database.BeginTransactionAsync();
         try
         {
             var now = DateTimeOffset.UtcNow;
 
             var conversation = new Conversation
             {
-                Id              = Guid.NewGuid(),
+                Id = Guid.NewGuid(),
                 CreatedByUserId = currentUserId,
-                Kind            = "Direct",
-                LastMessageSeq  = 0L,
-                CreatedAt       = now,
-                LastActivityAt  = now,
+                Kind = "Direct",
+                LastMessageSeq = 0L,
+                CreatedAt = now,
+                LastActivityAt = now
             };
 
-            var directConv = new DirectConversation
+            var directConversation = new DirectConversation
             {
                 ConversationId = conversation.Id,
-                UserLowId      = userLowId,
-                UserHighId     = userHighId,
+                UserLowId = userLowId,
+                UserHighId = userHighId
             };
 
-            var memberCurrent = new ConversationMember
+            var currentMember = new ConversationMember
             {
-                ConversationId   = conversation.Id,
-                UserId           = currentUserId,
-                Role             = "Member",
-                JoinedSeq        = 0L,
-                JoinedAt         = now,
-                LastReadSeq      = 0L,
-                LastDeliveredSeq = 0L,
+                ConversationId = conversation.Id,
+                UserId = currentUserId,
+                Role = "Member",
+                JoinedSeq = 0L,
+                JoinedAt = now,
+                LastReadSeq = 0L,
+                LastDeliveredSeq = 0L
             };
 
-            var memberTarget = new ConversationMember
+            var targetMember = new ConversationMember
             {
-                ConversationId   = conversation.Id,
-                UserId           = targetUserId,
-                Role             = "Member",
-                JoinedSeq        = 0L,
-                JoinedAt         = now,
-                LastReadSeq      = 0L,
-                LastDeliveredSeq = 0L,
+                ConversationId = conversation.Id,
+                UserId = targetUserId,
+                Role = "Member",
+                JoinedSeq = 0L,
+                JoinedAt = now,
+                LastReadSeq = 0L,
+                LastDeliveredSeq = 0L
             };
 
             _dbContext.Conversations.Add(conversation);
-            _dbContext.DirectConversations.Add(directConv);
-            _dbContext.ConversationMembers.Add(memberCurrent);
-            _dbContext.ConversationMembers.Add(memberTarget);
+            _dbContext.DirectConversations.Add(directConversation);
+            _dbContext.ConversationMembers.Add(currentMember);
+            _dbContext.ConversationMembers.Add(targetMember);
 
             await _dbContext.SaveChangesAsync();
-            await tx.CommitAsync();
+            await transaction.CommitAsync();
 
             return ToDto(conversation, isNewlyCreated: true);
         }
@@ -154,62 +163,91 @@ public class ConversationService : IConversationService
                 ConstraintName: "IX_DirectConversations_UserLowId_UserHighId"
             })
         {
-            // Race condition: another concurrent request already created the conversation.
-            await tx.RollbackAsync();
-            await tx.DisposeAsync();
+            // Một request khác đã tạo hội thoại cho cùng cặp người dùng.
+            await transaction.RollbackAsync();
+            await transaction.DisposeAsync();
+
             _dbContext.ChangeTracker.Clear();
 
-            var race = await _dbContext.DirectConversations
-                .FirstOrDefaultAsync(dc => dc.UserLowId == userLowId && dc.UserHighId == userHighId)
+            var winner = await _dbContext.DirectConversations
+                .FirstOrDefaultAsync(direct =>
+                    direct.UserLowId == userLowId &&
+                    direct.UserHighId == userHighId)
                 ?? throw new InvalidOperationException(
                     "Race condition resolved but existing record could not be found.");
 
-            return await GetExistingAsync(race.ConversationId, currentUserId, targetUserId);
+            // Vẫn phải kiểm tra quyền trước khi trả hội thoại của request thắng.
+            return await GetExistingAsync(
+                winner.ConversationId,
+                currentUserId,
+                targetUserId);
         }
         catch
         {
-            await tx.RollbackAsync();
+            await transaction.RollbackAsync();
             throw;
         }
     }
 
-    private async Task<ConversationDto> GetExistingAsync(Guid conversationId, Guid currentUserId, Guid targetUserId)
+    private async Task<ConversationDto> GetExistingAsync(
+        Guid conversationId,
+        Guid currentUserId,
+        Guid targetUserId)
     {
-        // The creator of a block retains history; its recipient does not.
-        // Apply this equally to normal retrieval and the concurrent-create fallback.
-        if (!await _dbContext.ConversationMembers.AnyAsync(m =>
-                m.ConversationId == conversationId && m.UserId == currentUserId && m.LeftAt == null)
-            || await _blockService.HasBlockedAsync(targetUserId, currentUserId))
-            throw new UnauthorizedAccessException("CONVERSATION_ACCESS_DENIED");
+        var isActiveMember = await _dbContext.ConversationMembers
+            .AnyAsync(member =>
+                member.ConversationId == conversationId &&
+                member.UserId == currentUserId &&
+                member.LeftAt == null);
 
-        var conversation = await _dbContext.Conversations.AsNoTracking()
-            .SingleAsync(c => c.Id == conversationId);
+        // Người chặn giữ quyền xem lịch sử.
+        // Người bị đối phương chặn không được truy cập.
+        if (!isActiveMember ||
+            await _blockService.HasBlockedAsync(
+                targetUserId,
+                currentUserId))
+        {
+            throw new UnauthorizedAccessException(
+                "CONVERSATION_ACCESS_DENIED");
+        }
+
+        var conversation = await _dbContext.Conversations
+            .AsNoTracking()
+            .SingleAsync(item => item.Id == conversationId);
+
         return ToDto(conversation);
     }
 
-    // -----------------------------------------------------------------------
-    // GetConversationsAsync
-    // -----------------------------------------------------------------------
-
-    public async Task<List<ConversationDto>> GetConversationsAsync(Guid currentUserId)
+    public async Task<List<ConversationDto>> GetConversationsAsync(
+        Guid currentUserId)
     {
-        // Only conversations where currentUser is an active member (LeftAt == null)
         var items = await _dbContext.ConversationMembers
             .AsNoTracking()
-            .Where(m => m.UserId == currentUserId && m.LeftAt == null)
-            .Join(_dbContext.Conversations,
-                m => m.ConversationId,
-                c => c.Id,
-                (m, c) => new { Member = m, Conversation = c })
-            .Where(x => !_dbContext.DirectConversations.Any(d =>
-                d.ConversationId == x.Conversation.Id
-                && _dbContext.UserBlocks.Any(b => b.BlockedUserId == currentUserId
-                    && (b.BlockerUserId == d.UserLowId || b.BlockerUserId == d.UserHighId))))
-            .OrderByDescending(x => x.Conversation.LastActivityAt)
+            .Where(member =>
+                member.UserId == currentUserId &&
+                member.LeftAt == null)
+            .Join(
+                _dbContext.Conversations,
+                member => member.ConversationId,
+                conversation => conversation.Id,
+                (member, conversation) => new
+                {
+                    Member = member,
+                    Conversation = conversation
+                })
+            .Where(item =>
+                !_dbContext.DirectConversations.Any(direct =>
+                    direct.ConversationId == item.Conversation.Id &&
+                    _dbContext.UserBlocks.Any(block =>
+                        block.BlockedUserId == currentUserId &&
+                        (block.BlockerUserId == direct.UserLowId ||
+                         block.BlockerUserId == direct.UserHighId))))
+            .OrderByDescending(item =>
+                item.Conversation.LastActivityAt)
             .ToListAsync();
 
         return items
-            .Select(x => ToDto(x.Conversation))
+            .Select(item => ToDto(item.Conversation))
             .ToList();
     }
 }

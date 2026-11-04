@@ -8,10 +8,7 @@ public class ConversationDto
     public string Kind { get; set; } = "Direct";
     public long LastMessageSeq { get; set; }
 
-    /// <summary>
-    /// Internal flag used by the Controller to decide HTTP 201 vs 200.
-    /// Excluded from the JSON response body.
-    /// </summary>
+    // Chỉ dùng nội bộ để chọn HTTP 201/200, không đưa ra JSON.
     [JsonIgnore]
     public bool IsNewlyCreated { get; set; }
 }

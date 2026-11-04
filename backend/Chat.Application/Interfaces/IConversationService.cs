@@ -4,6 +4,10 @@ namespace Chat.Application.Interfaces;
 
 public interface IConversationService
 {
-    Task<ConversationDto> CreateDirectAsync(Guid currentUserId, Guid targetUserId);
-    Task<List<ConversationDto>> GetConversationsAsync(Guid currentUserId);
+    Task<ConversationDto> CreateDirectAsync(
+        Guid currentUserId,
+        Guid targetUserId);
+
+    Task<List<ConversationDto>> GetConversationsAsync(
+        Guid currentUserId);
 }

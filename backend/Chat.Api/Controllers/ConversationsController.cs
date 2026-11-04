@@ -15,30 +15,23 @@ public class ConversationsController : ControllerBase
 {
     private readonly IConversationService _conversationService;
 
-    public ConversationsController(IConversationService conversationService)
+    public ConversationsController(
+        IConversationService conversationService)
     {
         _conversationService = conversationService;
     }
-
-    // -----------------------------------------------------------------------
-    // Helper: resolve the authenticated user's ID
-    // -----------------------------------------------------------------------
 
     private Guid? ResolveCurrentUserId()
     {
         if (User.Identity?.IsAuthenticated != true)
             return null;
 
-        var sub = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        if (Guid.TryParse(sub, out var userId))
-            return userId;
+        var value = User.FindFirstValue(ClaimTypes.NameIdentifier);
 
-        return null;
+        return Guid.TryParse(value, out var userId)
+            ? userId
+            : null;
     }
-
-    // -----------------------------------------------------------------------
-    // POST api/conversations/direct
-    // -----------------------------------------------------------------------
 
     [HttpPost("direct")]
     [ValidateAntiforgeryJson]
@@ -46,31 +39,39 @@ public class ConversationsController : ControllerBase
         [FromBody] CreateDirectConversationRequest request)
     {
         if (!ModelState.IsValid)
+        {
             return BadRequest(new AuthErrorResponse
             {
-                Code    = "VALIDATION_ERROR",
+                Code = "VALIDATION_ERROR",
                 Message = "TargetUserId is required and must be a valid GUID."
             });
+        }
 
         if (request.TargetUserId == Guid.Empty)
+        {
             return BadRequest(new AuthErrorResponse
             {
-                Code    = "VALIDATION_ERROR",
+                Code = "VALIDATION_ERROR",
                 Message = "TargetUserId must not be an empty GUID."
             });
+        }
 
         var currentUserId = ResolveCurrentUserId();
+
         if (currentUserId is null)
-            return StatusCode(StatusCodes.Status401Unauthorized, new AuthErrorResponse
+        {
+            return Unauthorized(new AuthErrorResponse
             {
-                Code    = "UNAUTHORIZED",
+                Code = "UNAUTHORIZED",
                 Message = "Unauthorized"
             });
+        }
 
         try
         {
             var dto = await _conversationService.CreateDirectAsync(
-                currentUserId.Value, request.TargetUserId);
+                currentUserId.Value,
+                request.TargetUserId);
 
             return dto.IsNewlyCreated
                 ? StatusCode(StatusCodes.Status201Created, dto)
@@ -84,40 +85,47 @@ public class ConversationsController : ControllerBase
                 message = "Target user does not exist."
             });
         }
-        catch (UnauthorizedAccessException ex) when (ex.Message is "DIRECT_CONVERSATION_NOT_ALLOWED" or "CONVERSATION_ACCESS_DENIED")
+        catch (UnauthorizedAccessException ex)
+            when (ex.Message is
+                "DIRECT_CONVERSATION_NOT_ALLOWED" or
+                "CONVERSATION_ACCESS_DENIED")
         {
-            return StatusCode(StatusCodes.Status403Forbidden, new AuthErrorResponse
-            {
-                Code    = ex.Message,
-                Message = "You are not allowed to create this conversation."
-            });
+            return StatusCode(
+                StatusCodes.Status403Forbidden,
+                new AuthErrorResponse
+                {
+                    Code = ex.Message,
+                    Message = "You are not allowed to create this conversation."
+                });
         }
         catch (ArgumentException ex)
         {
             return BadRequest(new AuthErrorResponse
             {
-                Code    = "VALIDATION_ERROR",
+                Code = "VALIDATION_ERROR",
                 Message = ex.Message
             });
         }
     }
 
-    // -----------------------------------------------------------------------
-    // GET api/conversations
-    // -----------------------------------------------------------------------
-
     [HttpGet]
     public async Task<IActionResult> GetAll()
     {
         var currentUserId = ResolveCurrentUserId();
+
         if (currentUserId is null)
-            return StatusCode(StatusCodes.Status401Unauthorized, new AuthErrorResponse
+        {
+            return Unauthorized(new AuthErrorResponse
             {
-                Code    = "UNAUTHORIZED",
+                Code = "UNAUTHORIZED",
                 Message = "Unauthorized"
             });
+        }
 
-        var dtos = await _conversationService.GetConversationsAsync(currentUserId.Value);
-        return Ok(dtos);
+        var conversations =
+            await _conversationService.GetConversationsAsync(
+                currentUserId.Value);
+
+        return Ok(conversations);
     }
 }
