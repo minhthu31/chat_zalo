@@ -1,0 +1,79 @@
+@using Microsoft.AspNetCore.Components.Forms
+@using Chat.Client.Models
+@using Chat.Client.Services
+@using Chat.Client.State
+@inject AuthState Auth
+
+<EditForm Model="_model" OnValidSubmit="SubmitAsync" FormName="login">
+    <DataAnnotationsValidator />
+
+    <div>
+        <label for="usernameOrEmail">Tên đăng nhập hoặc email</label>
+        <InputText id="usernameOrEmail" @bind-Value="_model.UsernameOrEmail" />
+        <ValidationMessage For="() => _model.UsernameOrEmail" />
+    </div>
+
+    <div>
+        <label for="password">Mật khẩu</label>
+        <InputText id="password" type="password" @bind-Value="_model.Password" />
+        <ValidationMessage For="() => _model.Password" />
+    </div>
+
+    @if (_error is not null)
+    {
+        <p role="alert" style="color: red">@_error</p>
+    }
+
+    <button type="submit" disabled="@_busy">@(_busy ? "Đang đăng nhập..." : "Đăng nhập")</button>
+</EditForm>
+
+@code {
+    // Trang chứa form quyết định làm gì sau khi đăng nhập thành công (ví dụ chuyển trang)
+    [Parameter] public EventCallback OnSuccess { get; set; }
+
+    private readonly LoginInput _model = new();
+    private string? _error;
+    private bool _busy;
+
+    private async Task SubmitAsync()
+    {
+        _busy = true;
+        _error = null;
+
+        try
+        {
+            await Auth.LoginAsync(new LoginRequest
+            {
+                UsernameOrEmail = _model.UsernameOrEmail.Trim(),
+                Password = _model.Password
+            });
+            await OnSuccess.InvokeAsync();
+        }
+        catch (ApiException ex)
+        {
+            // Xử lý theo Code (không theo Message) đúng quy ước API_CONTRACT
+            _error = ex.Code switch
+            {
+                "INVALID_CREDENTIALS" => "Tên đăng nhập/email hoặc mật khẩu không đúng.",
+                "ACCOUNT_LOCKED" => "Tài khoản tạm thời bị khóa do đăng nhập sai nhiều lần.",
+                "INVALID_CSRF_TOKEN" => "Phiên làm việc hết hạn, vui lòng tải lại trang.",
+                "VALIDATION_ERROR" => "Dữ liệu nhập chưa hợp lệ.",
+                _ => "Không thể đăng nhập, vui lòng thử lại."
+            };
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    // Lớp riêng cho form: có luật kiểm tra (validation) mà model của contract không có
+    private class LoginInput
+    {
+        [System.ComponentModel.DataAnnotations.Required(ErrorMessage = "Vui lòng nhập tên đăng nhập hoặc email.")]
+        public string UsernameOrEmail { get; set; } = "";
+
+        [System.ComponentModel.DataAnnotations.Required(ErrorMessage = "Vui lòng nhập mật khẩu.")]
+        public string Password { get; set; } = "";
+    }
+}

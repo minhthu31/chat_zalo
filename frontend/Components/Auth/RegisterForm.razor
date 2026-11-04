@@ -1,0 +1,90 @@
+@using System.ComponentModel.DataAnnotations
+@using Microsoft.AspNetCore.Components.Forms
+@using Chat.Client.Models
+@using Chat.Client.Services
+@inject IAuthApiClient AuthApi
+
+<EditForm Model="_model" OnValidSubmit="SubmitAsync" FormName="register">
+    <DataAnnotationsValidator />
+
+    <div>
+        <label for="username">Tên đăng nhập</label>
+        <InputText id="username" @bind-Value="_model.Username" />
+        <ValidationMessage For="() => _model.Username" />
+    </div>
+
+    <div>
+        <label for="email">Email</label>
+        <InputText id="email" type="email" @bind-Value="_model.Email" />
+        <ValidationMessage For="() => _model.Email" />
+    </div>
+
+    <div>
+        <label for="password">Mật khẩu</label>
+        <InputText id="password" type="password" @bind-Value="_model.Password" />
+        <ValidationMessage For="() => _model.Password" />
+    </div>
+
+    @if (_error is not null)
+    {
+        <p role="alert" style="color: red">@_error</p>
+    }
+
+    <button type="submit" disabled="@_busy">@(_busy ? "Đang đăng ký..." : "Đăng ký")</button>
+</EditForm>
+
+@code {
+    // Đăng ký xong KHÔNG tự đăng nhập (theo contract), trang chứa form sẽ đưa người dùng sang trang Login
+    [Parameter] public EventCallback OnSuccess { get; set; }
+
+    private readonly RegisterInput _model = new();
+    private string? _error;
+    private bool _busy;
+
+    private async Task SubmitAsync()
+    {
+        _busy = true;
+        _error = null;
+
+        try
+        {
+            await AuthApi.RegisterAsync(new RegisterRequest
+            {
+                Username = _model.Username.Trim(),
+                Email = _model.Email.Trim(),
+                Password = _model.Password
+            });
+            await OnSuccess.InvokeAsync();
+        }
+        catch (ApiException ex)
+        {
+            // Xử lý theo Code. CONFLICT là mã chung (409) mà bản giả đang trả
+            _error = ex.Code switch
+            {
+                "USERNAME_ALREADY_EXISTS" => "Tên đăng nhập đã được sử dụng.",
+                "EMAIL_ALREADY_EXISTS" => "Email đã được sử dụng.",
+                "CONFLICT" => "Tên đăng nhập hoặc email đã được sử dụng.",
+                "INVALID_CSRF_TOKEN" => "Phiên làm việc hết hạn, vui lòng tải lại trang.",
+                "VALIDATION_ERROR" => "Dữ liệu nhập chưa hợp lệ.",
+                _ => "Không thể đăng ký, vui lòng thử lại."
+            };
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private class RegisterInput
+    {
+        [Required(ErrorMessage = "Vui lòng nhập tên đăng nhập.")]
+        public string Username { get; set; } = "";
+
+        [Required(ErrorMessage = "Vui lòng nhập email.")]
+        [EmailAddress(ErrorMessage = "Email không hợp lệ.")]
+        public string Email { get; set; } = "";
+
+        [Required(ErrorMessage = "Vui lòng nhập mật khẩu.")]
+        public string Password { get; set; } = "";
+    }
+}

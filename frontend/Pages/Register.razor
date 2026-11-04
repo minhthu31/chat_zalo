@@ -1,2 +1,14 @@
 @page "/register"
-@* TODO: Thành viên được phân công triển khai giao diện Register. *@
+@using global::Chat.Client.Components.Auth
+@inject NavigationManager Nav
+
+<h1>Đăng ký</h1>
+
+<RegisterForm OnSuccess="GoLogin" />
+
+<p>Đã có tài khoản? <a href="login">Đăng nhập</a></p>
+
+@code {
+    // Đăng ký không tự đăng nhập nên chuyển sang trang Login
+    private void GoLogin() => Nav.NavigateTo("/login");
+}
