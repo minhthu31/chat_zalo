@@ -41,7 +41,7 @@ public class ConversationsController : ControllerBase
     // -----------------------------------------------------------------------
 
     [HttpPost("direct")]
-    [ValidateAntiforgeryJson(ErrorMessage = "Invalid or missing CSRF token")]
+    [ValidateAntiforgeryJson]
     public async Task<IActionResult> CreateDirect(
         [FromBody] CreateDirectConversationRequest request)
     {

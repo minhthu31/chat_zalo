@@ -1,4 +1,4 @@
-using Chat.Application.DTOs.Auth;
+﻿using Chat.Application.DTOs.Auth;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
@@ -12,8 +12,6 @@ namespace Chat.Api.Filters;
 [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method)]
 public sealed class ValidateAntiforgeryJsonAttribute : Attribute, IAsyncAuthorizationFilter
 {
-    public string? ErrorMessage { get; set; }
-
     public async Task OnAuthorizationAsync(AuthorizationFilterContext context)
     {
         var method = context.HttpContext.Request.Method;
@@ -35,7 +33,7 @@ public sealed class ValidateAntiforgeryJsonAttribute : Attribute, IAsyncAuthoriz
             context.Result = new ObjectResult(new AuthErrorResponse
             {
                 Code = "INVALID_CSRF_TOKEN",
-                Message = ErrorMessage ?? "Invalid or missing CSRF token"
+                Message = "CSRF token không hợp lệ hoặc đã hết hạn."
             })
             {
                 StatusCode = StatusCodes.Status400BadRequest

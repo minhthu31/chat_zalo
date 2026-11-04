@@ -25,6 +25,10 @@ public class ConversationServiceTests
 
     private static ChatDbContext CreateDbContext()
     {
+        var database = new Npgsql.NpgsqlConnectionStringBuilder(ConnectionString).Database ?? "";
+        if (!database.Contains("_test", StringComparison.OrdinalIgnoreCase)
+            && !database.Contains("_review", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("A dedicated test/review database is required.");
         var options = new DbContextOptionsBuilder<ChatDbContext>()
             .UseNpgsql(ConnectionString)
             .Options;
@@ -156,7 +160,7 @@ public class ConversationServiceTests
 
         // At most one of them is "newly created"; the other sees IsNewlyCreated = false
         var newCount = results.Count(r => r.IsNewlyCreated);
-        Assert.True(newCount <= 1, $"Expected at most 1 IsNewlyCreated=true, got {newCount}");
+        Assert.Equal(1, newCount);
 
         // Only one row in DB
         var (low, high) = string.Compare(
@@ -168,6 +172,7 @@ public class ConversationServiceTests
         var count = await verify.DirectConversations.CountAsync(
             dc => dc.UserLowId == low && dc.UserHighId == high);
         Assert.Equal(1, count);
+        Assert.Equal(2, await verify.ConversationMembers.CountAsync(m => m.ConversationId == results[0].Id));
     }
 
     // -----------------------------------------------------------------------
@@ -294,5 +299,114 @@ public class ConversationServiceTests
 
         Assert.Contains(listB, c => c.Id == convIdB);
         Assert.DoesNotContain(listB, c => c.Id == convIdA);
+    }
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExistingAndList_ApplyDirectionalBlocks(bool reverse)
+    {
+        var (ctx, svc, a, b) = await SetupFriendPairAsync();
+        await using (ctx)
+        {
+            var id = (await svc.CreateDirectAsync(a, b)).Id;
+            var blocker = reverse ? b : a;
+            var blocked = reverse ? a : b;
+            var blocks = new BlockService(ctx);
+            await blocks.BlockAsync(blocker, blocked);
+            Assert.Contains(await svc.GetConversationsAsync(blocker), x => x.Id == id);
+            Assert.DoesNotContain(await svc.GetConversationsAsync(blocked), x => x.Id == id);
+            Assert.Equal(id, (await svc.CreateDirectAsync(blocker, blocked)).Id);
+            var error = await Assert.ThrowsAsync<UnauthorizedAccessException>(() => svc.CreateDirectAsync(blocked, blocker));
+            Assert.Equal("CONVERSATION_ACCESS_DENIED", error.Message);
+            await blocks.UnblockAsync(blocker, blocked);
+            Assert.Contains(await svc.GetConversationsAsync(blocked), x => x.Id == id);
+        }
+    }
+
+    [Fact]
+    public async Task ConcurrentOppositeCreates_WithBothInsertsReady_ReturnOneCompleteConversation()
+    {
+        var (setup, _, a, b) = await SetupFriendPairAsync();
+        await setup.DisposeAsync();
+        var gate = new InsertGate();
+        async Task<ConversationDto> Create(Guid caller, Guid target)
+        {
+            await using var db = new ChatDbContext(new DbContextOptionsBuilder<ChatDbContext>()
+                .UseNpgsql(ConnectionString).AddInterceptors(gate).Options);
+            return await new ConversationService(db, new FriendshipService(db), new BlockService(db)).CreateDirectAsync(caller, target);
+        }
+        var results = await Task.WhenAll(Create(a, b), Create(b, a));
+        Assert.Equal(results[0].Id, results[1].Id);
+        Assert.Single(results, r => r.IsNewlyCreated);
+        await using var verify = CreateDbContext();
+        Assert.Equal(1, await verify.Conversations.CountAsync(c => c.Id == results[0].Id));
+        Assert.Equal(1, await verify.DirectConversations.CountAsync(c => c.ConversationId == results[0].Id));
+        var members = await verify.ConversationMembers.Where(m => m.ConversationId == results[0].Id).Select(m => m.UserId).ToListAsync();
+        Assert.Equal(2, members.Count);
+        Assert.Contains(a, members); Assert.Contains(b, members);
+        Assert.Equal(1, await verify.Conversations.CountAsync(c => c.CreatedByUserId == a || c.CreatedByUserId == b));
+    }
+
+    [Fact]
+    public async Task CommitFailure_RollsBackConversationPairAndBothMemberships()
+    {
+        var (setup, _, a, b) = await SetupFriendPairAsync();
+        await setup.DisposeAsync();
+        await using var db = new ChatDbContext(new DbContextOptionsBuilder<ChatDbContext>()
+            .UseNpgsql(ConnectionString).AddInterceptors(new FailCommit()).Options);
+        var service = new ConversationService(db, new FriendshipService(db), new BlockService(db));
+        await Assert.ThrowsAsync<InjectedCommitException>(() => service.CreateDirectAsync(a, b));
+        var id = db.ChangeTracker.Entries<Conversation>().Single().Entity.Id;
+        await using var verify = CreateDbContext();
+        Assert.False(await verify.Conversations.AnyAsync(c => c.Id == id));
+        Assert.False(await verify.DirectConversations.AnyAsync(c => c.ConversationId == id));
+        Assert.False(await verify.ConversationMembers.AnyAsync(c => c.ConversationId == id));
+    }
+
+    private sealed class InsertGate : Microsoft.EntityFrameworkCore.Diagnostics.SaveChangesInterceptor
+    {
+        private int arrivals;
+        private readonly TaskCompletionSource ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public override async ValueTask<Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<int>> SavingChangesAsync(
+            Microsoft.EntityFrameworkCore.Diagnostics.DbContextEventData eventData,
+            Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (eventData.Context!.ChangeTracker.Entries<DirectConversation>().Any(e => e.State == EntityState.Added))
+            {
+                if (Interlocked.Increment(ref arrivals) == 2) ready.TrySetResult();
+                await ready.Task.WaitAsync(TimeSpan.FromSeconds(15), cancellationToken);
+            }
+            return result;
+        }
+    }
+
+    private sealed class InjectedCommitException : Exception { }
+    private sealed class FailCommit : Microsoft.EntityFrameworkCore.Diagnostics.DbTransactionInterceptor
+    {
+        public override ValueTask<Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult> TransactionCommittingAsync(
+            System.Data.Common.DbTransaction transaction,
+            Microsoft.EntityFrameworkCore.Diagnostics.TransactionEventData eventData,
+            Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult result,
+            CancellationToken cancellationToken = default) => throw new InjectedCommitException();
+    }
+
+    [Fact]
+    public async Task ExistingConversation_RequiresActiveMembership()
+    {
+        var (ctx, svc, a, b) = await SetupFriendPairAsync();
+        await using (ctx)
+        {
+            var id = (await svc.CreateDirectAsync(a, b)).Id;
+            var member = await ctx.ConversationMembers.SingleAsync(m => m.ConversationId == id && m.UserId == a);
+            member.LeftAt = DateTimeOffset.UtcNow;
+            await ctx.SaveChangesAsync();
+            Assert.DoesNotContain(await svc.GetConversationsAsync(a), x => x.Id == id);
+            var error = await Assert.ThrowsAsync<UnauthorizedAccessException>(() => svc.CreateDirectAsync(a, b));
+            Assert.Equal("CONVERSATION_ACCESS_DENIED", error.Message);
+            ctx.ConversationMembers.Remove(member);
+            await ctx.SaveChangesAsync();
+            await Assert.ThrowsAsync<UnauthorizedAccessException>(() => svc.CreateDirectAsync(a, b));
+        }
     }
 }

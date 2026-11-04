@@ -4,6 +4,7 @@ using Chat.Application.Interfaces;
 using Chat.Application.Services;
 using Chat.Infrastructure.Data;
 using Chat.Infrastructure.Identity;
+using Humanizer.Configuration;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Identity;
@@ -16,8 +17,7 @@ var configuration = builder.Configuration;
 // Read local configuration or override with environment variables.
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
     ?? builder.Configuration.GetConnectionString("ChatDb")
-    ?? throw new InvalidOperationException(
-        "Configure ConnectionStrings:ChatDb or ConnectionStrings:DefaultConnection.");
+    ?? throw new InvalidOperationException("Configure ConnectionStrings:ChatDb or ConnectionStrings:DefaultConnection.");
 
 builder.Services.AddDbContext<ChatDbContext>(options =>
     options.UseNpgsql(connectionString));
@@ -119,12 +119,14 @@ builder.Services.AddCors(options =>
 
 // S1-02 application abstractions
 builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.AddScoped<IConversationService, ConversationService>();
+builder.Services.AddScoped<IBlockService, BlockService>();
+builder.Services.AddScoped<IFriendshipService, FriendshipService>();
 builder.Services.AddScoped<IAccountGateway, IdentityAccountGateway>();
 
-// ---- Application services ----
-builder.Services.AddScoped<IFriendshipService, FriendshipService>();
-builder.Services.AddScoped<IBlockService, BlockService>();
-builder.Services.AddScoped<IConversationService, ConversationService>();
+// CHAT-3: Users API
+builder.Services.AddScoped<IUserService, UserService>();
+builder.Services.AddScoped<IUserAccountGateway, IdentityUserAccountGateway>();
 
 builder.Services.AddControllers();
 
