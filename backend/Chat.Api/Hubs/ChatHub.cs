@@ -31,20 +31,30 @@ namespace chat_zalo.Hubs
                 throw new HubException("Unauthorized user.");
             }
 
+            // Fix F1: Thêm cm.LeftAt == null để chặn người đã rời nhóm
             var isMember = await _dbContext.ConversationMembers
-                .AnyAsync(cm => cm.ConversationId == conversationId && cm.UserId == userId);
+                .AnyAsync(cm => cm.ConversationId == conversationId
+                             && cm.UserId == userId
+                             && cm.LeftAt == null);
 
             if (!isMember)
             {
                 throw new HubException("You are not a member of this conversation.");
             }
 
-            await Groups.AddToGroupAsync(Context.ConnectionId, conversationIdStr);
+            // Fix F2: Chuẩn hóa tên nhóm bằng conversationId.ToString("D") và dùng AddToGroupAsync
+            await Groups.AddToGroupAsync(Context.ConnectionId, conversationId.ToString("D"));
         }
 
         public async Task LeaveConversation(string conversationIdStr)
         {
-            await Groups.RemoveFromGroupAsync(Context.ConnectionId, conversationIdStr);
+            if (!Guid.TryParse(conversationIdStr, out var conversationId))
+            {
+                throw new HubException("Invalid conversation ID format.");
+            }
+
+            // Fix F2: Chuẩn hóa tên nhóm bằng conversationId.ToString("D") và dùng RemoveFromGroupAsync
+            await Groups.RemoveFromGroupAsync(Context.ConnectionId, conversationId.ToString("D"));
         }
     }
 }
