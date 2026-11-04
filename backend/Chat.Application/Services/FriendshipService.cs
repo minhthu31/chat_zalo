@@ -88,34 +88,38 @@ public sealed class FriendshipService(ChatDbContext db) : IFriendshipService
     {
         ValidateDistinctUsers(currentUserId, requesterUserId);
         var (low, high) = Normalize(currentUserId, requesterUserId);
-        var relationship = await db.Friendships.AsNoTracking()
-            .SingleOrDefaultAsync(x => x.UserLowId == low && x.UserHighId == high)
+
+        // Lock the canonical pair before reading it. Under PostgreSQL READ COMMITTED,
+        // SELECT ... FOR UPDATE waits for a concurrent writer and then returns the
+        // committed row version. This serializes accept/reject against cancel/re-send
+        // without adding a column or changing the API contract.
+        await using var transaction = await db.Database.BeginTransactionAsync();
+        var relationship = await LoadForUpdateAsync(low, high)
             ?? throw Error(404, "FRIENDSHIP_NOT_FOUND", "Friend request or friendship was not found.");
         EnsurePendingIncoming(relationship, currentUserId, requesterUserId);
 
         var changed = await db.Friendships
             .Where(x => x.UserLowId == low && x.UserHighId == high &&
-                        x.Status == "Pending" && x.RequesterUserId == requesterUserId)
+                        x.Status == "Pending" && x.RequesterUserId == requesterUserId &&
+                        x.CreatedAt == relationship.CreatedAt)
             .ExecuteUpdateAsync(update => update
                 .SetProperty(x => x.Status, nextStatus)
                 .SetProperty(x => x.UpdatedAt, DateTimeOffset.UtcNow));
-        if (changed == 0)
-        {
-            var latest = await db.Friendships.AsNoTracking()
-                .SingleOrDefaultAsync(x => x.UserLowId == low && x.UserHighId == high);
-            if (latest is null)
-                throw Error(404, "FRIENDSHIP_NOT_FOUND", "Friend request or friendship was not found.");
-            EnsurePendingIncoming(latest, currentUserId, requesterUserId);
+        if (changed != 1)
             throw Error(409, "FRIEND_REQUEST_STATE_CONFLICT", "The friend request changed while it was being processed.");
-        }
+
+        await transaction.CommitAsync();
     }
 
     public async Task RemoveAsync(Guid currentUserId, Guid targetUserId)
     {
         ValidateDistinctUsers(currentUserId, targetUserId);
         var (low, high) = Normalize(currentUserId, targetUserId);
-        var relationship = await db.Friendships.AsNoTracking()
-            .SingleOrDefaultAsync(x => x.UserLowId == low && x.UserHighId == high)
+
+        // Use the same row lock as Accept/Reject so a remove cannot act on a stale
+        // snapshot while another transaction cancels and re-opens this pair.
+        await using var transaction = await db.Database.BeginTransactionAsync();
+        var relationship = await LoadForUpdateAsync(low, high)
             ?? throw Error(404, "FRIENDSHIP_NOT_FOUND", "No active friend request or friendship exists.");
 
         if (relationship.Status == "Pending" && relationship.RequesterUserId != currentUserId)
@@ -123,18 +127,30 @@ public sealed class FriendshipService(ChatDbContext db) : IFriendshipService
         if (relationship.Status != "Pending" && relationship.Status != "Accepted")
             throw Error(404, "FRIENDSHIP_NOT_FOUND", "No active friend request or friendship exists.");
 
-        // Conditional update prevents a concurrent accept/reject/remove from being overwritten.
         var expectedStatus = relationship.Status;
         var changed = await db.Friendships
             .Where(x => x.UserLowId == low && x.UserHighId == high &&
                         x.Status == expectedStatus &&
+                        x.CreatedAt == relationship.CreatedAt &&
                         (expectedStatus != "Pending" || x.RequesterUserId == currentUserId))
             .ExecuteUpdateAsync(update => update
                 .SetProperty(x => x.Status, "Cancelled")
                 .SetProperty(x => x.UpdatedAt, DateTimeOffset.UtcNow));
-        if (changed == 0)
+        if (changed != 1)
             throw Error(409, "FRIENDSHIP_STATE_CONFLICT", "The friendship changed while it was being removed.");
+
+        await transaction.CommitAsync();
     }
+
+    private Task<Friendship?> LoadForUpdateAsync(Guid low, Guid high) =>
+        db.Friendships
+            .FromSqlInterpolated($"""
+                SELECT * FROM "Friendships"
+                WHERE "UserLowId" = {low} AND "UserHighId" = {high}
+                FOR UPDATE
+                """)
+            .AsNoTracking()
+            .SingleOrDefaultAsync();
 
     public Task<bool> AreFriendsAsync(Guid userAId, Guid userBId)
     {

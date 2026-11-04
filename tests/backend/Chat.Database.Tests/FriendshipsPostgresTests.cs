@@ -85,13 +85,137 @@ public sealed class FriendshipsPostgresTests
             Assert.Equal(1, await db.Friendships.CountAsync(x =>
                 (x.UserLowId == alice.Id && x.UserHighId == bob.Id) ||
                 (x.UserLowId == bob.Id && x.UserHighId == alice.Id)));
-            Assert.Equal("Cancelled", await db.Friendships.Select(x => x.Status).SingleAsync());
+            Assert.Equal("Cancelled", await db.Friendships
+                .Where(x => x.UserLowId == (alice.Id.CompareTo(bob.Id) < 0 ? alice.Id : bob.Id)
+                         && x.UserHighId == (alice.Id.CompareTo(bob.Id) < 0 ? bob.Id : alice.Id))
+                .Select(x => x.Status)
+                .SingleAsync());
         }
         finally
         {
             await db.Friendships.Where(x => x.UserLowId == alice.Id || x.UserHighId == alice.Id
                 || x.UserLowId == bob.Id || x.UserHighId == bob.Id).ExecuteDeleteAsync();
             await db.Users.Where(x => x.Id == alice.Id || x.Id == bob.Id).ExecuteDeleteAsync();
+        }
+    }
+
+    [Fact]
+    public async Task ConcurrentAcceptAndReject_FromIndependentContexts_OnlyOneTransitionWins()
+    {
+        var alice = NewUser("alice_race");
+        var bob = NewUser("bob_race");
+
+        await using (var setup = CreateContext())
+        {
+            await setup.Users.AddRangeAsync(alice, bob);
+            await setup.SaveChangesAsync();
+            await new FriendshipService(setup).SendRequestAsync(alice.Id, bob.Id);
+        }
+
+        try
+        {
+            var start = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            async Task<bool> RunAsync(Func<FriendshipService, Task> operation)
+            {
+                await using var independentContext = CreateContext();
+                var service = new FriendshipService(independentContext);
+                await start.Task;
+                try
+                {
+                    await operation(service);
+                    return true;
+                }
+                catch (FriendshipException)
+                {
+                    return false;
+                }
+            }
+
+            var accept = RunAsync(service => service.AcceptAsync(bob.Id, alice.Id));
+            var reject = RunAsync(service => service.RejectAsync(bob.Id, alice.Id));
+            start.SetResult(true);
+
+            var outcomes = await Task.WhenAll(accept, reject);
+            Assert.Single(outcomes, succeeded => succeeded);
+
+            await using var verify = CreateContext();
+            var low = alice.Id.CompareTo(bob.Id) < 0 ? alice.Id : bob.Id;
+            var high = alice.Id.CompareTo(bob.Id) < 0 ? bob.Id : alice.Id;
+            var finalStatus = await verify.Friendships
+                .Where(x => x.UserLowId == low && x.UserHighId == high)
+                .Select(x => x.Status)
+                .SingleAsync();
+            Assert.Contains(finalStatus, new[] { "Accepted", "Rejected" });
+        }
+        finally
+        {
+            await using var cleanup = CreateContext();
+            await cleanup.Friendships
+                .Where(x => (x.UserLowId == alice.Id && x.UserHighId == bob.Id)
+                         || (x.UserLowId == bob.Id && x.UserHighId == alice.Id))
+                .ExecuteDeleteAsync();
+            await cleanup.Users.Where(x => x.Id == alice.Id || x.Id == bob.Id).ExecuteDeleteAsync();
+        }
+    }
+
+    [Fact]
+    public async Task ConcurrentAcceptAndRemove_FromIndependentContexts_DoNotOverwriteEachOther()
+    {
+        var alice = NewUser("alice_remove_race");
+        var bob = NewUser("bob_remove_race");
+
+        await using (var setup = CreateContext())
+        {
+            await setup.Users.AddRangeAsync(alice, bob);
+            await setup.SaveChangesAsync();
+            await new FriendshipService(setup).SendRequestAsync(alice.Id, bob.Id);
+        }
+
+        try
+        {
+            var start = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            async Task<bool> RunAsync(Func<FriendshipService, Task> operation)
+            {
+                await using var independentContext = CreateContext();
+                var service = new FriendshipService(independentContext);
+                await start.Task;
+                try
+                {
+                    await operation(service);
+                    return true;
+                }
+                catch (FriendshipException)
+                {
+                    return false;
+                }
+            }
+
+            var accept = RunAsync(service => service.AcceptAsync(bob.Id, alice.Id));
+            var remove = RunAsync(service => service.RemoveAsync(alice.Id, bob.Id));
+            start.SetResult(true);
+
+            var outcomes = await Task.WhenAll(accept, remove);
+            Assert.Single(outcomes, succeeded => succeeded);
+
+            await using var verify = CreateContext();
+            var low = alice.Id.CompareTo(bob.Id) < 0 ? alice.Id : bob.Id;
+            var high = alice.Id.CompareTo(bob.Id) < 0 ? bob.Id : alice.Id;
+            var finalStatus = await verify.Friendships
+                .Where(x => x.UserLowId == low && x.UserHighId == high)
+                .Select(x => x.Status)
+                .SingleAsync();
+            Assert.Contains(finalStatus, new[] { "Accepted", "Cancelled" });
+        }
+        finally
+        {
+            await using var cleanup = CreateContext();
+            await cleanup.Friendships
+                .Where(x => (x.UserLowId == alice.Id && x.UserHighId == bob.Id)
+                         || (x.UserLowId == bob.Id && x.UserHighId == alice.Id))
+                .ExecuteDeleteAsync();
+            await cleanup.Users.Where(x => x.Id == alice.Id || x.Id == bob.Id).ExecuteDeleteAsync();
         }
     }
 
