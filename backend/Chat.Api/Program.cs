@@ -6,7 +6,6 @@ using Chat.Infrastructure.Data;
 using chat_zalo.Hubs;
 using chat_zalo.Services;
 using Chat.Infrastructure.Identity;
-using Humanizer.Configuration;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Identity;
@@ -16,9 +15,8 @@ using Microsoft.EntityFrameworkCore;
 var builder = WebApplication.CreateBuilder(args);
 var configuration = builder.Configuration;
 
-// Read local configuration or override with environment variables.
-var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
-    ?? builder.Configuration.GetConnectionString("ChatDb")
+var connectionString = configuration.GetConnectionString("DefaultConnection")
+    ?? configuration.GetConnectionString("ChatDb")
     ?? throw new InvalidOperationException("Configure ConnectionStrings:ChatDb or ConnectionStrings:DefaultConnection.");
 
 builder.Services.AddDbContext<ChatDbContext>(options =>
@@ -36,8 +34,7 @@ builder.Services.AddIdentityCore<ApplicationUser>(options =>
 .AddSignInManager();
 
 var cookieName = configuration["Authentication:CookieName"] ?? "Chat.Auth";
-var antiforgeryCookieName = configuration["Authentication:AntiforgeryCookieName"]
-    ?? "Chat.Antiforgery";
+var antiforgeryCookieName = configuration["Authentication:AntiforgeryCookieName"] ?? "Chat.Antiforgery";
 var sameSiteText = configuration["Authentication:SameSite"];
 var sameSite = Enum.TryParse<SameSiteMode>(sameSiteText, ignoreCase: true, out var parsedSameSite)
     ? parsedSameSite
@@ -47,7 +44,7 @@ var securePolicy = builder.Environment.IsDevelopment()
     ? CookieSecurePolicy.SameAsRequest
     : CookieSecurePolicy.Always;
 
-var cookieExpirationHours = builder.Configuration.GetValue<int?>("Authentication:CookieExpirationHours") ?? 8;
+var cookieExpirationHours = configuration.GetValue<int?>("Authentication:CookieExpirationHours") ?? 8;
 
 builder.Services
     .AddAuthentication(options =>
@@ -65,7 +62,6 @@ builder.Services
         options.ExpireTimeSpan = TimeSpan.FromHours(cookieExpirationHours);
         options.SlidingExpiration = true;
 
-        // API clients receive JSON/status codes instead of browser login redirects.
         options.Events.OnRedirectToLogin = context =>
         {
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
@@ -91,8 +87,6 @@ builder.Services
 
 builder.Services.AddAuthorization();
 
-// CSRF contract: GET /api/auth/csrf returns the request token in JSON;
-// unsafe requests send it back in the X-CSRF-TOKEN header.
 builder.Services.AddAntiforgery(options =>
 {
     options.HeaderName = "X-CSRF-TOKEN";
@@ -102,10 +96,7 @@ builder.Services.AddAntiforgery(options =>
     options.Cookie.SecurePolicy = securePolicy;
 });
 
-// CORS is ready for a future browser frontend. Keep the list empty until its
-// exact origin is known; never combine credentialed requests with wildcard origins.
-var allowedOrigins = configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
-    ?? Array.Empty<string>();
+var allowedOrigins = configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? Array.Empty<string>();
 
 builder.Services.AddCors(options =>
 {
@@ -121,7 +112,6 @@ builder.Services.AddCors(options =>
     });
 });
 
-// S1-02 application abstractions
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IConversationService, ConversationService>();
 builder.Services.AddScoped<IBlockService, BlockService>();
@@ -144,9 +134,7 @@ builder.Services.Configure<Microsoft.AspNetCore.Mvc.ApiBehaviorOptions>(options 
             .SelectMany(e => e.Value!.Errors.Select(err => err.ErrorMessage))
             .ToList();
 
-        var message = errors.Count > 0
-            ? string.Join(" ", errors)
-            : "Dữ liệu gửi lên không hợp lệ.";
+        var message = errors.Count > 0 ? string.Join(" ", errors) : "Dữ liệu gửi lên không hợp lệ.";
 
         return new BadRequestObjectResult(new AuthErrorResponse
         {
@@ -156,19 +144,14 @@ builder.Services.Configure<Microsoft.AspNetCore.Mvc.ApiBehaviorOptions>(options 
     };
 });
 
-// OpenAPI chuẩn .NET 10
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddOpenApi();
 builder.Services.AddSignalR();
-
-// === BỔ SUNG ĐĂNG KÝ DI CHO CHAT CONNECTION TRACKER TẠI ĐÂY ===
 builder.Services.AddSingleton<IChatConnectionTracker, ChatConnectionTracker>();
-
 builder.Services.AddScoped<IChatNotificationService, ChatNotificationService>();
 
 var app = builder.Build();
 
-// Middleware order: CORS -> Authentication -> Authorization
 app.UseCors("Frontend");
 app.UseAuthentication();
 app.UseAuthorization();
