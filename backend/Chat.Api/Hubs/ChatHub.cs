@@ -10,10 +10,12 @@ namespace chat_zalo.Hubs
     public class ChatHub : Hub
     {
         private readonly ChatDbContext _dbContext;
+        private readonly IChatConnectionTracker _tracker;
 
-        public ChatHub(ChatDbContext dbContext)
+        public ChatHub(ChatDbContext dbContext, IChatConnectionTracker tracker)
         {
             _dbContext = dbContext;
+            _tracker = tracker;
         }
 
         public async Task JoinConversation(string conversationIdStr)
@@ -31,7 +33,7 @@ namespace chat_zalo.Hubs
                 throw new HubException("Unauthorized user.");
             }
 
-            // Fix F1: Thêm cm.LeftAt == null để chặn người đã rời nhóm
+            // Kiểm tra membership hợp lệ và LeftAt == null
             var isMember = await _dbContext.ConversationMembers
                 .AnyAsync(cm => cm.ConversationId == conversationId
                              && cm.UserId == userId
@@ -42,8 +44,9 @@ namespace chat_zalo.Hubs
                 throw new HubException("You are not a member of this conversation.");
             }
 
-            // Fix F2: Chuẩn hóa tên nhóm bằng conversationId.ToString("D") và dùng AddToGroupAsync
-            await Groups.AddToGroupAsync(Context.ConnectionId, conversationId.ToString("D"));
+            string groupName = conversationId.ToString("D");
+            _tracker.AddConnection(Context.ConnectionId, userId, conversationId);
+            await Groups.AddToGroupAsync(Context.ConnectionId, groupName);
         }
 
         public async Task LeaveConversation(string conversationIdStr)
@@ -53,8 +56,15 @@ namespace chat_zalo.Hubs
                 throw new HubException("Invalid conversation ID format.");
             }
 
-            // Fix F2: Chuẩn hóa tên nhóm bằng conversationId.ToString("D") và dùng RemoveFromGroupAsync
-            await Groups.RemoveFromGroupAsync(Context.ConnectionId, conversationId.ToString("D"));
+            string groupName = conversationId.ToString("D");
+            _tracker.RemoveConnection(Context.ConnectionId);
+            await Groups.RemoveFromGroupAsync(Context.ConnectionId, groupName);
+        }
+
+        public override async Task OnDisconnectedAsync(Exception? exception)
+        {
+            _tracker.RemoveConnection(Context.ConnectionId);
+            await base.OnDisconnectedAsync(exception);
         }
     }
 }

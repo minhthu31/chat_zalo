@@ -14,25 +14,31 @@ namespace chat_zalo.Services
     {
         private readonly IHubContext<ChatHub> _hubContext;
         private readonly ChatDbContext _dbContext;
+        private readonly IChatConnectionTracker _tracker;
 
-        public ChatNotificationService(IHubContext<ChatHub> hubContext, ChatDbContext dbContext)
+        public ChatNotificationService(IHubContext<ChatHub> hubContext, ChatDbContext dbContext, IChatConnectionTracker tracker)
         {
             _hubContext = hubContext;
             _dbContext = dbContext;
+            _tracker = tracker;
         }
 
         public async Task NotifyConversationChangedAsync(Guid conversationId, Guid eventId, long latestSeq)
         {
-            // Lấy danh sách UserId thực tế còn hoạt động (LeftAt == null) trong conversation từ database
+            // Lấy danh sách UserId có membership hợp lệ (LeftAt == null) trong database tại thời điểm phát event
             var activeUserIds = await _dbContext.ConversationMembers
                 .Where(cm => cm.ConversationId == conversationId && cm.LeftAt == null)
-                .Select(cm => cm.UserId.ToString())
+                .Select(cm => cm.UserId)
                 .ToListAsync();
 
-            if (activeUserIds.Any())
+            if (!activeUserIds.Any()) return;
+
+            // Lấy chính xác các connection đang kết nối VÀ thuộc về user hợp lệ trong DB
+            var activeConnectionIds = _tracker.GetConnectionsForConversation(conversationId, activeUserIds);
+
+            if (activeConnectionIds.Any())
             {
-                // Chỉ gửi sự kiện đến những user thực sự có quyền hợp lệ, ngăn chặn user đã rời nhóm nhận dữ liệu
-                await _hubContext.Clients.Users(activeUserIds).SendAsync("ConversationChanged", new
+                await _hubContext.Clients.Clients(activeConnectionIds.ToList()).SendAsync("ConversationChanged", new
                 {
                     eventId = eventId,
                     conversationId = conversationId,
