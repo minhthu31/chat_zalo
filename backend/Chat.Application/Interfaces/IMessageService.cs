@@ -7,7 +7,8 @@ namespace Chat.Application.Interfaces
 {
     public interface IMessageService
     {
-        Task<(MessageResponse Data, int StatusCode)> SendMessageAsync(Guid senderId, SendMessageRequest request);
-        Task<IEnumerable<MessageResponse>> GetMessageHistoryAsync(Guid userId, Guid conversationId, long? beforeSeq, long? afterSeq, int limit);
+        Task<(MessageResponse Data, int StatusCode)> SendAsync(Guid senderUserId, Guid conversationId, SendMessageRequest request);
+        Task<IEnumerable<MessageResponse>> GetHistoryAsync(Guid userId, Guid conversationId, long? beforeSeq, long? afterSeq, int limit);
+        Task<IEnumerable<MessageResponse>> GetNewMessagesAsync(Guid userId, Guid conversationId, long lastSeq);
     }
 }

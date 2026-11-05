@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Security.Claims;
 using System.Threading.Tasks;
 using Chat.Application.DTOs.Messages;
@@ -6,11 +7,11 @@ using Chat.Application.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
-namespace Chat.API.Controllers
+namespace Chat.Api.Controllers
 {
     [Authorize]
     [ApiController]
-    [Route("api/[controller]")]
+    [Route("api/conversations/{id}/messages")]
     public class MessagesController : ControllerBase
     {
         private readonly IMessageService _messageService;
@@ -20,52 +21,41 @@ namespace Chat.API.Controllers
             _messageService = messageService;
         }
 
-        [HttpPost]
-        public async Task<IActionResult> SendMessage([FromBody] SendMessageRequest request)
+        private Guid GetCurrentUserId()
         {
-            var userIdClaim = User.FindFirst("sub") ?? User.FindFirst(ClaimTypes.NameIdentifier);
-            if (userIdClaim == null || !Guid.TryParse(userIdClaim.Value, out var senderId))
-            {
-                return Unauthorized(new { message = "Token không hợp lệ hoặc hết hạn." });
-            }
-
-            try
-            {
-                var (data, statusCode) = await _messageService.SendMessageAsync(senderId, request);
-                return StatusCode(statusCode, data);
-            }
-            catch (UnauthorizedAccessException ex)
-            {
-                return StatusCode(403, new { message = ex.Message });
-            }
-            catch (InvalidOperationException ex)
-            {
-                return BadRequest(new { message = ex.Message });
-            }
+            var userIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub");
+            return Guid.TryParse(userIdStr, out var userId) ? userId : throw new UnauthorizedAccessException("Không xác định được người dùng.");
         }
 
-        [HttpGet("conversation/{conversationId}")]
-        public async Task<IActionResult> GetHistory(
-            Guid conversationId, 
-            [FromQuery] long? beforeSeq, 
-            [FromQuery] long? afterSeq, 
-            [FromQuery] int limit = 20)
+        [HttpPost]
+        public async Task<ActionResult<MessageResponse>> SendMessage(Guid id, [FromBody] SendMessageRequest request)
         {
-            var userIdClaim = User.FindFirst("sub") ?? User.FindFirst(ClaimTypes.NameIdentifier);
-            if (userIdClaim == null || !Guid.TryParse(userIdClaim.Value, out var userId))
+            var userId = GetCurrentUserId();
+            var (data, statusCode) = await _messageService.SendAsync(userId, id, request);
+
+            if (statusCode == 409)
             {
-                return Unauthorized(new { message = "Token không hợp lệ hoặc hết hạn." });
+                return Conflict(new { message = "ClientMessageId đã tồn tại nhưng nội dung không khớp." });
             }
 
-            try
+            if (statusCode == 201)
             {
-                var result = await _messageService.GetMessageHistoryAsync(userId, conversationId, beforeSeq, afterSeq, limit);
-                return Ok(result);
+                return StatusCode(201, data);
             }
-            catch (UnauthorizedAccessException ex)
-            {
-                return StatusCode(403, new { message = ex.Message });
-            }
+
+            return Ok(data);
+        }
+
+        [HttpGet]
+        public async Task<ActionResult<IEnumerable<MessageResponse>>> GetHistory(
+            Guid id,
+            [FromQuery] long? beforeSeq,
+            [FromQuery] long? afterSeq,
+            [FromQuery] int limit = 20)
+        {
+            var userId = GetCurrentUserId();
+            var history = await _messageService.GetHistoryAsync(userId, id, beforeSeq, afterSeq, limit);
+            return Ok(history);
         }
     }
 }
