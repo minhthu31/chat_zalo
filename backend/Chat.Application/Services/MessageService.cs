@@ -21,7 +21,6 @@ namespace Chat.Infrastructure.Services
 
         public async Task<(MessageResponse Data, int StatusCode)> SendMessageAsync(Guid senderId, SendMessageRequest request)
         {
-            // Kiểm tra quyền hội thoại
             var isMember = await _context.ConversationMembers
                 .AnyAsync(m => m.ConversationId == request.ConversationId && m.UserId == senderId);
             if (!isMember)
@@ -29,7 +28,6 @@ namespace Chat.Infrastructure.Services
                 throw new UnauthorizedAccessException("Người dùng không thuộc hội thoại này.");
             }
 
-            // Kiểm tra Block
             var isBlocked = await _context.Blocks
                 .AnyAsync(b => (b.BlockerId == senderId && b.BlockedId == request.ReceiverId) ||
                                (b.BlockerId == request.ReceiverId && b.BlockedId == senderId));
@@ -38,7 +36,6 @@ namespace Chat.Infrastructure.Services
                 throw new InvalidOperationException("Không thể gửi tin nhắn do đã bị chặn.");
             }
 
-            // Xử lý Idempotency (Retry bằng ClientMessageId)
             var existingMessage = await _context.Messages
                 .FirstOrDefaultAsync(m => m.ClientMessageId == request.ClientMessageId);
 
@@ -54,10 +51,9 @@ namespace Chat.Infrastructure.Services
                     ClientMessageId = existingMessage.ClientMessageId,
                     CreatedAt = existingMessage.CreatedAt
                 };
-                return (existingResponse, 200); // 200 OK cho retry trùng request
+                return (existingResponse, 200);
             }
 
-            // Cấp Seq nguyên tử trong Transaction
             using var transaction = await _context.Database.BeginTransactionAsync();
             try
             {
@@ -91,7 +87,7 @@ namespace Chat.Infrastructure.Services
                     CreatedAt = message.CreatedAt
                 };
 
-                return (response, 201); // 201 Created cho tạo mới thành công
+                return (response, 201);
             }
             catch (Exception)
             {
