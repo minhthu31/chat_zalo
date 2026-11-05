@@ -1,0 +1,27 @@
+
+name: Backend CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore Backend
+        run: dotnet restore backend/Chat.sln
+
+      - name: Build Backend
+        run: dotnet build backend/Chat.sln --no-restore --configuration Release

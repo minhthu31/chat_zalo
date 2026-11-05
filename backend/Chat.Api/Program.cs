@@ -1,4 +1,4 @@
-﻿using Chat.Api.Controllers;
+using Chat.Api.Controllers;
 using Chat.Application.DTOs.Auth;
 using Chat.Application.Interfaces;
 using Chat.Application.Services;
@@ -123,8 +123,16 @@ builder.Services.AddCors(options =>
 
 // S1-02 application abstractions
 builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.AddScoped<IConversationService, ConversationService>();
+builder.Services.AddScoped<IBlockService, BlockService>();
+builder.Services.AddScoped<IFriendshipService, FriendshipService>();
 builder.Services.AddScoped<IAccountGateway, IdentityAccountGateway>();
 
+ feature/CHAT-8-signalr-realtime
+// CHAT-3: Users API
+builder.Services.AddScoped<IUserService, UserService>();
+builder.Services.AddScoped<IUserAccountGateway, IdentityUserAccountGateway>();
+ main
 builder.Services.AddControllers();
 
 builder.Services.Configure<Microsoft.AspNetCore.Mvc.ApiBehaviorOptions>(options =>
@@ -172,5 +180,13 @@ if (app.Environment.IsDevelopment())
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapControllers();
+feature/CHAT-8-signalr-realtime
 app.MapHub<ChatHub>("/hubs/chat");
 app.Run();
+
+
+app.Run();
+
+// Expose the existing entry point to HTTP integration tests.
+public partial class Program { }
+ main
