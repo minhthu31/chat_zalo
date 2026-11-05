@@ -144,10 +144,11 @@ builder.Services.Configure<Microsoft.AspNetCore.Mvc.ApiBehaviorOptions>(options 
         {
             Code = "VALIDATION_ERROR",
             Message = message
+    
         });
     };
 });
-
+builder.Services.AddScoped<IMessageService, MessageService>();
 // OpenAPI chuẩn .NET 10
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddOpenApi();
