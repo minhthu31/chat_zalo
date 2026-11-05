@@ -1,0 +1,61 @@
+*   [33m570189f[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mfeature/CHAT-7-backend-messages[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/feature/CHAT-7-backend-messages[m[33m, [m[1;31morigin/HEAD[m[33m, [m[1;32mmain[m[33m)[m Merge pull request #3 from minhthu31/feature/CHAT-6-backend-conversations
+[31m|[m[32m\[m  
+[31m|[m * [33m296cf08[m CHAT-6 fix
+[31m|[m *   [33m53571c3[m CHAT-6 integrate merged friendships and enforce conversation access
+[31m|[m [33m|[m[31m\[m  
+[31m|[m [33m|[m[31m/[m  
+[31m|[m[31m/[m[33m|[m   
+* [33m|[m   [33m9f0a509[m Merge pull request #10 from minhthu31/feature/CHAT-4-friendships
+[35m|[m[36m\[m [33m\[m  
+[35m|[m * [33m|[m [33m2af0ca8[m CHAT-4 Complete friendship concurrency and API tests
+[35m|[m * [33m|[m [33m230a893[m CHAT-4 Fix friendship concurrency and database tests
+[35m|[m * [33m|[m [33mc3b1d4a[m CHAT-4 Implement friendship management
+[35m|[m[35m/[m [33m/[m  
+* [33m|[m   [33m9b290ef[m Merge pull request #5 from minhthu31/feature/Chat-03-users-profile
+[1;31m|[m[1;32m\[m [33m\[m  
+[1;31m|[m * [33m|[m [33m9145fb2[m chat 03
+[1;31m|[m * [33m|[m   [33m4af5f7f[m Chat 03 User- profile (2)
+[1;31m|[m [1;33m|[m[1;31m\[m [33m\[m  
+[1;31m|[m [1;33m|[m[1;31m/[m [33m/[m  
+[1;31m|[m[1;31m/[m[1;33m|[m [33m|[m   
+[1;31m|[m * [33m|[m [33m0bc8497[m[33m ([m[1;31morigin/feature/Chat-03-users-profile[m[33m)[m Chat 03 User- profile (1)
+[1;31m|[m * [33m|[m [33m022d46d[m CHAT-03 User profiles and user search
+[1;31m|[m [1;34m|[m *   [33mb3107dd[m[33m ([m[1;31morigin/feature/CHAT-6-backend-conversations[m[33m)[m CHAT-6 Giải quyết conflict với CHAT-5, xóa DI IBlockService trùng và trả 404 NOT_FOUND khi targetUserId không tồn tại
+[1;31m|[m [1;34m|[m [1;35m|[m[1;31m\[m  
+[1;31m|[m [1;34m|[m[1;31m_[m[1;35m|[m[1;31m/[m  
+[1;31m|[m[1;31m/[m[1;34m|[m [1;35m|[m   
+[1;31m|[m [1;34m|[m *   [33m4e07976[m CHAT-6 Khắc phục 5 điểm review F1-F5: bỏ X-User-Id, thêm CSRF, chuẩn hóa DTO/Interface và xử lý conflict Program.cs
+[1;31m|[m [1;34m|[m [31m|[m[1;34m\[m  
+[1;31m|[m [1;34m|[m [31m|[m[1;34m/[m  
+[1;31m|[m [1;34m|[m[1;34m/[m[31m|[m   
+[1;31m|[m [1;34m|[m * [33m89a1536[m CHAT-6 Xây dựng Backend API tạo hội thoại 1-1 và lấy danh sách hội thoại
+[1;31m|[m [1;34m|[m [32m|[m * [33mb29fab2[m[33m ([m[1;31morigin/feature/CHAT-8-signalr-realtime[m[33m)[m CHAT-8 fix: add using chat_zalo.Services in Program.cs
+[1;31m|[m [1;34m|[m [32m|[m * [33mb5506e4[m CHAT-8 fix review changes: AddToGroupAsync, membership check, notification service and program.cs config
+[1;31m|[m [1;34m|[m [32m|[m * [33m646d417[m CHAT-8 update ChatHub with Authorize, JoinConversation and ConversationChanged
+[1;31m|[m [1;34m|[m [32m|[m * [33m5f605df[m CHAT-8 SignalR realtime endpoint hubs/chat
+[1;31m|[m [1;34m|[m [32m|[m[1;34m/[m  
+[1;31m|[m [1;34m|[m[1;34m/[m[32m|[m   
+[1;31m|[m [1;34m|[m [32m|[m * [33m2f03326[m[33m ([m[1;31morigin/feature/fe-auth-social[m[33m)[m feat(fe): add auth api client interface and fake implementation
+[1;31m|[m [1;34m|[m [32m|[m * [33m45faaca[m fix(fe): add content to Models files
+[1;31m|[m [1;34m|[m [32m|[m * [33m65c2b62[m feat(fe): add Auth, User, Friendship models
+[1;31m|[m [1;34m|[m [32m|[m[1;34m/[m  
+[1;31m|[m [1;34m|[m[1;34m/[m[32m|[m   
+[1;31m|[m [1;34m|[m [32m|[m * [33m4a2ef66[m[33m ([m[1;31morigin/feature/CHAT-4-friendships[m[33m)[m CHAT-4 Implement friendship backend
+[1;31m|[m [1;34m|[m[1;31m_[m[32m|[m[1;31m/[m  
+[1;31m|[m[1;31m/[m[1;34m|[m [32m|[m   
+* [1;34m|[m [32m|[m [33m253404e[m Fix database guard in block integration tests
+* [1;34m|[m [32m|[m   [33m3fcabef[m Merge pull request #7 from minhthu31/feature/CHAT-5-implement-block-and-unblock
+[36m|[m[1;31m\[m [1;34m\[m [32m\[m  
+[36m|[m * [1;34m\[m [32m\[m   [33mfcabc13[m Merge remote-tracking branch 'origin/main' into feature/CHAT-5-implement-block-and-unblock
+[36m|[m [1;32m|[m[36m\[m [1;34m\[m [32m\[m  
+[36m|[m [1;32m|[m[36m/[m [1;34m/[m [32m/[m  
+[36m|[m[36m/[m[1;32m|[m [1;34m|[m [32m|[m   
+* [1;32m|[m [1;34m|[m [32m|[m   [33m2947f88[m Merge pull request #8 from minhthu31/chore/backend-ci
+[1;34m|[m[1;35m\[m [1;32m\[m [1;34m\[m [32m\[m  
+[1;34m|[m [1;35m|[m[1;34m_[m[1;32m|[m[1;34m/[m [32m/[m  
+[1;34m|[m[1;34m/[m[1;35m|[m [1;32m|[m [32m|[m   
+[1;34m|[m * [1;32m|[m [32m|[m [33mf57863d[m fix(ci): configure backend build workflow
+[1;34m|[m * [1;32m|[m [32m|[m [33med6d7d4[m ci: add backend build and test workflow
+[1;34m|[m[1;34m/[m [1;32m/[m [32m/[m  
+[1;34m|[m * [32m/[m [33macac085[m feat(CHAT-5): implement block and unblock APIs
+[1;34m|[m[1;34m/[m [32m/[m  
