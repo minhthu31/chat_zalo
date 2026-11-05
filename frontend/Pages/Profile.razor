@@ -1,6 +1,7 @@
 @page "/profile"
 @using System.ComponentModel.DataAnnotations
 @using Microsoft.AspNetCore.Components.Forms
+@using global::Chat.Client.Components.Auth
 @using global::Chat.Client.Models
 @using global::Chat.Client.Services
 @inject IUserApiClient UserApi
@@ -21,7 +22,8 @@
         }
         else
         {
-            <p class="profile-username">Tên đăng nhập: <strong>@_username</strong></p>
+            <div class="avatar avatar-lg">@AvatarText.From(_model.DisplayName)</div>
+            <p class="profile-username">@@@_username</p>
 
             <EditForm Model="_model" OnValidSubmit="SaveAsync" FormName="profile">
                 <DataAnnotationsValidator />
@@ -43,6 +45,10 @@
 
                 <button type="submit" class="btn btn-primary btn-block" disabled="@_saving">@(_saving ? "Đang lưu..." : "Lưu")</button>
             </EditForm>
+
+            <div class="logout-row">
+                <LogoutButton />
+            </div>
         }
     </div>
 </div>

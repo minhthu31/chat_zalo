@@ -1,0 +1,43 @@
+@using Chat.Client.Services
+@using Chat.Client.State
+@inject AuthState Auth
+@inject NavigationManager Nav
+
+<button type="button" class="btn btn-danger btn-block" disabled="@_busy" @onclick="LogoutAsync">
+    @(_busy ? "Đang đăng xuất..." : "Đăng xuất")
+</button>
+
+@if (_error is not null)
+{
+    <p role="alert" class="alert alert-error">@_error</p>
+}
+
+@code {
+    private bool _busy;
+    private string? _error;
+
+    private async Task LogoutAsync()
+    {
+        _busy = true;
+        _error = null;
+
+        try
+        {
+            await Auth.LogoutAsync();
+            Nav.NavigateTo("/login"); // đăng xuất xong quay về trang đăng nhập
+        }
+        catch (ApiException ex)
+        {
+            _error = ex.Code switch
+            {
+                "INVALID_CSRF_TOKEN" => "Phiên làm việc hết hạn, vui lòng tải lại trang.",
+                "NETWORK_ERROR" => "Không kết nối được máy chủ.",
+                _ => "Không đăng xuất được, vui lòng thử lại."
+            };
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

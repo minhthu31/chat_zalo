@@ -30,8 +30,11 @@ else
         {
             <div class="list-item">
                 <span class="person">
-                    <span class="person-name">@f.DisplayName</span>
-                    <span class="muted">@@@f.Username</span>
+                    <span class="avatar">@AvatarText.From(f.DisplayName)</span>
+                    <span class="person-text">
+                        <span class="person-name">@f.DisplayName</span>
+                        <span class="muted">@@@f.Username</span>
+                    </span>
                 </span>
                 <span class="actions">
                     <button class="btn btn-danger btn-sm" disabled="@_busy" @onclick="() => RunAsync(() => FriendshipApi.RemoveAsync(f.UserId))">Hủy kết bạn</button>
@@ -50,8 +53,11 @@ else
         {
             <div class="list-item">
                 <span class="person">
-                    <span class="person-name">@f.DisplayName</span>
-                    <span class="muted">@@@f.Username</span>
+                    <span class="avatar">@AvatarText.From(f.DisplayName)</span>
+                    <span class="person-text">
+                        <span class="person-name">@f.DisplayName</span>
+                        <span class="muted">@@@f.Username</span>
+                    </span>
                 </span>
                 <span class="actions">
                     <button class="btn btn-primary btn-sm" disabled="@_busy" @onclick="() => RunAsync(() => FriendshipApi.AcceptAsync(f.UserId))">Chấp nhận</button>
@@ -71,8 +77,11 @@ else
         {
             <div class="list-item">
                 <span class="person">
-                    <span class="person-name">@f.DisplayName</span>
-                    <span class="muted">@@@f.Username</span>
+                    <span class="avatar">@AvatarText.From(f.DisplayName)</span>
+                    <span class="person-text">
+                        <span class="person-name">@f.DisplayName</span>
+                        <span class="muted">@@@f.Username</span>
+                    </span>
                 </span>
                 <span class="actions">
                     <button class="btn btn-sm" disabled="@_busy" @onclick="() => RunAsync(() => FriendshipApi.RemoveAsync(f.UserId))">Hủy lời mời</button>

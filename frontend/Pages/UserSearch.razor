@@ -33,8 +33,11 @@
         {
             <div class="list-item">
                 <span class="person">
-                    <span class="person-name">@u.DisplayName</span>
-                    <span class="muted">@@@u.Username</span>
+                    <span class="avatar">@AvatarText.From(u.DisplayName)</span>
+                    <span class="person-text">
+                        <span class="person-name">@u.DisplayName</span>
+                        <span class="muted">@@@u.Username</span>
+                    </span>
                 </span>
                 <span class="actions">
                     <button class="btn btn-primary btn-sm" disabled="@(_sending || _sent.Contains(u.Id))" @onclick="() => SendRequestAsync(u)">
