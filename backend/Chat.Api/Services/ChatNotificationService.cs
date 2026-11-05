@@ -1,13 +1,13 @@
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using Chat.Application.Interfaces;
 using chat_zalo.Hubs;
 using Chat.Infrastructure.Data;
 
 namespace chat_zalo.Services
 {
-    public interface IChatNotificationService
+    public interface IChatNotificationService : IConversationEventPublisher
     {
-        Task NotifyConversationChangedAsync(Guid conversationId, Guid eventId, long latestSeq);
     }
 
     public class ChatNotificationService : IChatNotificationService

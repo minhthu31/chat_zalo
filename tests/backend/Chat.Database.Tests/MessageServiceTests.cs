@@ -1,4 +1,5 @@
 using Chat.Application.DTOs.Messages;
+using Chat.Application.Interfaces;
 using Chat.Application.Services;
 using Chat.Domain.Entities;
 using Chat.Infrastructure.Data;
@@ -12,6 +13,40 @@ namespace Chat.Database.Tests;
 
 public sealed class MessageServiceTests
 {
+    private sealed class NullPublisher : IConversationEventPublisher
+    {
+        public static readonly NullPublisher Instance = new();
+
+        public Task NotifyConversationChangedAsync(
+            Guid conversationId,
+            Guid eventId,
+            long latestSeq) => Task.CompletedTask;
+    }
+
+    private sealed record PublishedEvent(
+        Guid ConversationId,
+        Guid EventId,
+        long LatestSeq,
+        bool MessageWasCommitted);
+
+    private sealed class RecordingPublisher : IConversationEventPublisher
+    {
+        public List<PublishedEvent> Events { get; } = [];
+
+        public async Task NotifyConversationChangedAsync(
+            Guid conversationId,
+            Guid eventId,
+            long latestSeq)
+        {
+            await using var verify = CreateContext();
+            var committed = await verify.Messages.AnyAsync(message =>
+                message.ConversationId == conversationId &&
+                message.Seq == latestSeq);
+            Events.Add(new PublishedEvent(
+                conversationId, eventId, latestSeq, committed));
+        }
+    }
+
     private static ChatDbContext CreateContext(
         SaveChangesInterceptor? interceptor = null)
     {
@@ -106,12 +141,13 @@ public sealed class MessageServiceTests
         Guid userId,
         Guid conversationId,
         Guid clientMessageId,
-        string body)
+        string body,
+        IConversationEventPublisher? publisher = null)
     {
         // Mỗi request dùng một DbContext riêng.
         await using var db = CreateContext();
 
-        return await new MessageService(db).SendAsync(
+        return await new MessageService(db, publisher ?? NullPublisher.Instance).SendAsync(
             userId,
             conversationId,
             new SendMessageRequest
@@ -119,6 +155,39 @@ public sealed class MessageServiceTests
                 ClientMessageId = clientMessageId,
                 Body = body
             });
+    }
+
+    [Fact]
+    public async Task NewMessage_PublishesOnlyAfterCommit_AndRetryDoesNotPublishAgain()
+    {
+        var (sender, _, conversationId) = await SeedAsync();
+        var publisher = new RecordingPublisher();
+        var clientMessageId = Guid.NewGuid();
+
+        var created = await SendAsync(
+            sender,
+            conversationId,
+            clientMessageId,
+            "publish once",
+            publisher);
+
+        Assert.True(created.IsNewlyCreated);
+        var published = Assert.Single(publisher.Events);
+        Assert.Equal(conversationId, published.ConversationId);
+        Assert.Equal(created.Seq, published.LatestSeq);
+        Assert.NotEqual(Guid.Empty, published.EventId);
+        Assert.True(published.MessageWasCommitted);
+
+        var retry = await SendAsync(
+            sender,
+            conversationId,
+            clientMessageId,
+            "publish once",
+            publisher);
+
+        Assert.False(retry.IsNewlyCreated);
+        Assert.Equal(created.Id, retry.Id);
+        Assert.Single(publisher.Events);
     }
 
     [Fact]
@@ -191,7 +260,7 @@ public sealed class MessageServiceTests
 
         var responses = await Task.WhenAll(tasks);
 
-        Assert.Single(responses.Where(r => r.IsNewlyCreated));
+        Assert.Single(responses, response => response.IsNewlyCreated);
         Assert.Single(responses.Select(r => r.Id).Distinct());
 
         await using var verify = CreateContext();
@@ -268,7 +337,7 @@ public sealed class MessageServiceTests
         }
 
         await using var db = CreateContext();
-        var service = new MessageService(db);
+        var service = new MessageService(db, NullPublisher.Instance);
 
         var latest = await service.GetHistoryAsync(
             a,
@@ -337,7 +406,7 @@ public sealed class MessageServiceTests
         }
 
         await using var readDb = CreateContext();
-        var service = new MessageService(readDb);
+        var service = new MessageService(readDb, NullPublisher.Instance);
 
         // Người chủ động chặn vẫn xem được lịch sử.
         Assert.Single(
@@ -386,7 +455,7 @@ public sealed class MessageServiceTests
         await using var readDb = CreateContext();
 
         var readError = await Assert.ThrowsAsync<MessageServiceException>(
-            () => new MessageService(readDb)
+            () => new MessageService(readDb, NullPublisher.Instance)
                 .GetHistoryAsync(
                     a,
                     conversationId,
@@ -465,13 +534,17 @@ public sealed class MessageServiceTests
     public async Task SaveFailure_RollsBackMessageAndSequence()
     {
         var (a, _, conversationId) = await SeedAsync();
+        var publisher = new RecordingPublisher();
 
         // Tin đã lưu thành công phải còn nguyên sau rollback.
         var first = await SendAsync(
             a,
             conversationId,
             Guid.NewGuid(),
-            "existing message");
+            "existing message",
+            publisher);
+
+        Assert.Single(publisher.Events);
 
         var failedClientId = Guid.NewGuid();
 
@@ -482,7 +555,7 @@ public sealed class MessageServiceTests
         await using (var failingDb = CreateContext(interceptor))
         {
             var error = await Assert.ThrowsAsync<InvalidOperationException>(
-                () => new MessageService(failingDb).SendAsync(
+                () => new MessageService(failingDb, publisher).SendAsync(
                     a,
                     conversationId,
                     new SendMessageRequest
@@ -497,6 +570,8 @@ public sealed class MessageServiceTests
 
             Assert.True(interceptor.SequenceIncrementObserved);
         }
+
+        Assert.Single(publisher.Events);
 
         // DbContext mới đọc trạng thái đã commit trong PostgreSQL.
         await using (var verify = CreateContext())
@@ -529,10 +604,13 @@ public sealed class MessageServiceTests
             a,
             conversationId,
             Guid.NewGuid(),
-            "message after rollback");
+            "message after rollback",
+            publisher);
 
         Assert.True(next.IsNewlyCreated);
         Assert.Equal(first.Seq + 1, next.Seq);
+        Assert.Equal(2, publisher.Events.Count);
+        Assert.All(publisher.Events, published => Assert.True(published.MessageWasCommitted));
 
         await using var finalVerify = CreateContext();
 

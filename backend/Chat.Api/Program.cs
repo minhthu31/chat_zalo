@@ -123,7 +123,12 @@ builder.Services.AddCors(options =>
 
 // S1-02 application abstractions
 builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.AddScoped<IConversationService, ConversationService>();
+builder.Services.AddScoped<IBlockService, BlockService>();
+builder.Services.AddScoped<IFriendshipService, FriendshipService>();
 builder.Services.AddScoped<IAccountGateway, IdentityAccountGateway>();
+builder.Services.AddScoped<IUserService, UserService>();
+builder.Services.AddScoped<IUserAccountGateway, IdentityUserAccountGateway>();
 
 builder.Services.AddControllers();
 
@@ -156,7 +161,11 @@ builder.Services.AddSignalR();
 
 // Đăng ký DI bắt buộc cho CHAT-8
 builder.Services.AddSingleton<IChatConnectionTracker, ChatConnectionTracker>();
-builder.Services.AddScoped<IChatNotificationService, ChatNotificationService>();
+builder.Services.AddScoped<ChatNotificationService>();
+builder.Services.AddScoped<IChatNotificationService>(services =>
+    services.GetRequiredService<ChatNotificationService>());
+builder.Services.AddScoped<IConversationEventPublisher>(services =>
+    services.GetRequiredService<ChatNotificationService>());
 
 var app = builder.Build();
 

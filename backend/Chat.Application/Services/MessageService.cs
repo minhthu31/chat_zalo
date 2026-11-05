@@ -15,10 +15,14 @@ namespace Chat.Application.Services;
 public sealed class MessageService : IMessageService
 {
     private readonly ChatDbContext _db;
+    private readonly IConversationEventPublisher _eventPublisher;
 
-    public MessageService(ChatDbContext db)
+    public MessageService(
+        ChatDbContext db,
+        IConversationEventPublisher eventPublisher)
     {
         _db = db;
+        _eventPublisher = eventPublisher;
     }
 
     public async Task<MessageResponse> SendAsync(
@@ -128,8 +132,10 @@ public sealed class MessageService : IMessageService
             throw;
         }
 
-        // Tích hợp publisher CHAT-8 tại đây, sau commit.
-        // Không phát event trong nhánh retry trả tin cũ.
+        await _eventPublisher.NotifyConversationChangedAsync(
+            conversationId,
+            Guid.NewGuid(),
+            message.Seq);
 
         return ToResponse(message, isNewlyCreated: true);
     }
