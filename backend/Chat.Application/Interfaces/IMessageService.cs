@@ -3,12 +3,24 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using Chat.Application.DTOs.Messages;
 
-namespace Chat.Application.Interfaces
+namespace Chat.Application.Interfaces;
+
+public interface IMessageService
 {
-    public interface IMessageService
-    {
-        Task<(MessageResponse Data, int StatusCode)> SendAsync(Guid senderUserId, Guid conversationId, SendMessageRequest request);
-        Task<IEnumerable<MessageResponse>> GetHistoryAsync(Guid userId, Guid conversationId, long? beforeSeq, long? afterSeq, int limit);
-        Task<IEnumerable<MessageResponse>> GetNewMessagesAsync(Guid userId, Guid conversationId, long lastSeq);
-    }
+    Task<MessageResponse> SendAsync(
+        Guid currentUserId,
+        Guid conversationId,
+        SendMessageRequest request);
+
+    Task<List<MessageResponse>> GetHistoryAsync(
+        Guid currentUserId,
+        Guid conversationId,
+        long? beforeSeq,
+        int limit = 20);
+
+    Task<List<MessageResponse>> GetNewMessagesAsync(
+        Guid currentUserId,
+        Guid conversationId,
+        long afterSeq,
+        int limit = 20);
 }

@@ -1,61 +1,118 @@
 using System;
-using System.Collections.Generic;
 using System.Security.Claims;
 using System.Threading.Tasks;
+using Chat.Api.Filters;
 using Chat.Application.DTOs.Messages;
+using Chat.Application.Services;
 using Chat.Application.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
-namespace Chat.Api.Controllers
+namespace Chat.Api.Controllers;
+
+[Authorize]
+[ApiController]
+[Route("api/conversations/{id}/messages")]
+public sealed class MessagesController : ControllerBase
 {
-    [Authorize]
-    [ApiController]
-    [Route("api/conversations/{id}/messages")]
-    public class MessagesController : ControllerBase
+    private readonly IMessageService _messageService;
+
+    public MessagesController(IMessageService messageService)
     {
-        private readonly IMessageService _messageService;
+        _messageService = messageService;
+    }
 
-        public MessagesController(IMessageService messageService)
+    [HttpPost]
+    [ValidateAntiforgeryJson]
+    public async Task<IActionResult> SendMessage(
+        [FromRoute] Guid id,
+        [FromBody] SendMessageRequest request)
+    {
+        if (!TryGetCurrentUserId(out var userId))
         {
-            _messageService = messageService;
-        }
-
-        private Guid GetCurrentUserId()
-        {
-            var userIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub");
-            return Guid.TryParse(userIdStr, out var userId) ? userId : throw new UnauthorizedAccessException("Không xác định được người dùng.");
-        }
-
-        [HttpPost]
-        public async Task<ActionResult<MessageResponse>> SendMessage(Guid id, [FromBody] SendMessageRequest request)
-        {
-            var userId = GetCurrentUserId();
-            var (data, statusCode) = await _messageService.SendAsync(userId, id, request);
-
-            if (statusCode == 409)
+            return Unauthorized(new
             {
-                return Conflict(new { message = "ClientMessageId đã tồn tại nhưng nội dung không khớp." });
+                code = "UNAUTHORIZED",
+                message = "Không xác định được người dùng."
+            });
+        }
+
+        try
+        {
+            var response = await _messageService.SendAsync(
+                userId, id, request);
+
+            if (response.IsNewlyCreated)
+            {
+                return Created(
+                    $"/api/conversations/{id}/messages",
+                    response);
             }
 
-            if (statusCode == 201)
-            {
-                return StatusCode(201, data);
-            }
-
-            return Ok(data);
+            return Ok(response);
         }
-
-        [HttpGet]
-        public async Task<ActionResult<IEnumerable<MessageResponse>>> GetHistory(
-            Guid id,
-            [FromQuery] long? beforeSeq,
-            [FromQuery] long? afterSeq,
-            [FromQuery] int limit = 20)
+        catch (MessageServiceException exception)
         {
-            var userId = GetCurrentUserId();
-            var history = await _messageService.GetHistoryAsync(userId, id, beforeSeq, afterSeq, limit);
-            return Ok(history);
+            return ServiceError(exception);
         }
+    }
+
+    [HttpGet]
+    public async Task<IActionResult> GetHistory(
+        [FromRoute] Guid id,
+        [FromQuery] long? beforeSeq,
+        [FromQuery] long? afterSeq,
+        [FromQuery] int limit = 20)
+    {
+        if (!TryGetCurrentUserId(out var userId))
+        {
+            return Unauthorized(new
+            {
+                code = "UNAUTHORIZED",
+                message = "Không xác định được người dùng."
+            });
+        }
+
+        if (beforeSeq.HasValue && afterSeq.HasValue)
+        {
+            return BadRequest(new
+            {
+                code = "INVALID_PAGINATION_PARAMETERS",
+                message = "Không được truyền đồng thời beforeSeq và afterSeq."
+            });
+        }
+
+        try
+        {
+            var messages = afterSeq.HasValue
+                ? await _messageService.GetNewMessagesAsync(
+                    userId, id, afterSeq.Value, limit)
+                : await _messageService.GetHistoryAsync(
+                    userId, id, beforeSeq, limit);
+
+            return Ok(messages);
+        }
+        catch (MessageServiceException exception)
+        {
+            return ServiceError(exception);
+        }
+    }
+
+    private bool TryGetCurrentUserId(out Guid userId)
+    {
+        var claim = User.FindFirstValue(ClaimTypes.NameIdentifier)
+            ?? User.FindFirstValue("sub");
+
+        return Guid.TryParse(claim, out userId)
+            && userId != Guid.Empty;
+    }
+
+    private ObjectResult ServiceError(MessageServiceException exception)
+    {
+        return StatusCode(exception.StatusCode, new
+        {
+            code = exception.Code,
+            message = exception.Message
+        });
     }
 }

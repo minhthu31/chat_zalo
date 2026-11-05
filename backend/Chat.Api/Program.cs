@@ -1,5 +1,3 @@
-
-using Chat.Infrastructure.Services;
 using Chat.Api.Controllers;
 using Chat.Application.DTOs.Auth;
 using Chat.Application.Interfaces;
