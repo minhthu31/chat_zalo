@@ -3,6 +3,8 @@ using Chat.Application.DTOs.Auth;
 using Chat.Application.Interfaces;
 using Chat.Application.Services;
 using Chat.Infrastructure.Data;
+using chat_zalo.Hubs;
+using chat_zalo.Services;
 using Chat.Infrastructure.Identity;
 using Humanizer.Configuration;
 using Microsoft.AspNetCore.Antiforgery;
@@ -40,10 +42,12 @@ var sameSiteText = configuration["Authentication:SameSite"];
 var sameSite = Enum.TryParse<SameSiteMode>(sameSiteText, ignoreCase: true, out var parsedSameSite)
     ? parsedSameSite
     : SameSiteMode.Lax;
+
 var securePolicy = builder.Environment.IsDevelopment()
     ? CookieSecurePolicy.SameAsRequest
     : CookieSecurePolicy.Always;
-var cookieExpirationHours = configuration.GetValue<int?>("Authentication:CookieExpirationHours") ?? 8;
+
+var cookieExpirationHours = builder.Configuration.GetValue<int?>("Authentication:CookieExpirationHours") ?? 8;
 
 builder.Services
     .AddAuthentication(options =>
@@ -123,8 +127,6 @@ builder.Services.AddScoped<IConversationService, ConversationService>();
 builder.Services.AddScoped<IBlockService, BlockService>();
 builder.Services.AddScoped<IFriendshipService, FriendshipService>();
 builder.Services.AddScoped<IAccountGateway, IdentityAccountGateway>();
-
-// CHAT-3: Users API
 builder.Services.AddScoped<IUserService, UserService>();
 builder.Services.AddScoped<IUserAccountGateway, IdentityUserAccountGateway>();
 
@@ -155,6 +157,15 @@ builder.Services.AddScoped<IMessageService, MessageService>();
 // OpenAPI chuẩn .NET 10
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddOpenApi();
+builder.Services.AddSignalR();
+
+// Đăng ký DI bắt buộc cho CHAT-8
+builder.Services.AddSingleton<IChatConnectionTracker, ChatConnectionTracker>();
+builder.Services.AddScoped<ChatNotificationService>();
+builder.Services.AddScoped<IChatNotificationService>(services =>
+    services.GetRequiredService<ChatNotificationService>());
+builder.Services.AddScoped<IConversationEventPublisher>(services =>
+    services.GetRequiredService<ChatNotificationService>());
 
 var app = builder.Build();
 
@@ -170,8 +181,5 @@ if (app.Environment.IsDevelopment())
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapControllers();
-
+app.MapHub<ChatHub>("/hubs/chat");
 app.Run();
-
-// Expose the existing entry point to HTTP integration tests.
-public partial class Program { }

@@ -1,10 +1,12 @@
 using Chat.Application.DTOs.Messages;
+using Chat.Application.Interfaces;
 using Chat.Application.Services;
 using Chat.Domain.Entities;
 using Chat.Infrastructure.Data;
 using Chat.Infrastructure.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 using Xunit;
 
@@ -12,6 +14,67 @@ namespace Chat.Database.Tests;
 
 public sealed class MessageServiceTests
 {
+    private sealed class NullPublisher : IConversationEventPublisher
+    {
+        public static readonly NullPublisher Instance = new();
+
+        public Task NotifyConversationChangedAsync(
+            Guid conversationId,
+            Guid eventId,
+            long latestSeq) => Task.CompletedTask;
+    }
+
+    private sealed record PublishedEvent(
+        Guid ConversationId,
+        Guid EventId,
+        long LatestSeq,
+        bool MessageWasCommitted);
+
+    private sealed class RecordingPublisher : IConversationEventPublisher
+    {
+        public List<PublishedEvent> Events { get; } = [];
+
+        public async Task NotifyConversationChangedAsync(
+            Guid conversationId,
+            Guid eventId,
+            long latestSeq)
+        {
+            await using var verify = CreateContext();
+            var committed = await verify.Messages.AnyAsync(message =>
+                message.ConversationId == conversationId &&
+                message.Seq == latestSeq);
+            Events.Add(new PublishedEvent(
+                conversationId, eventId, latestSeq, committed));
+        }
+    }
+
+    private sealed class ThrowingPublisher : IConversationEventPublisher
+    {
+        public int Calls { get; private set; }
+        public bool MessageWasCommittedWhenCalled { get; private set; }
+
+        public async Task NotifyConversationChangedAsync(
+            Guid conversationId,
+            Guid eventId,
+            long latestSeq)
+        {
+            Calls++;
+            await using var verify = CreateContext();
+            MessageWasCommittedWhenCalled = await verify.Messages.AnyAsync(message =>
+                message.ConversationId == conversationId &&
+                message.Seq == latestSeq);
+            throw new InvalidOperationException("SIMULATED_SIGNALR_PUBLISH_FAILURE");
+        }
+    }
+
+    private static MessageService CreateService(
+        ChatDbContext db,
+        IConversationEventPublisher? publisher = null) =>
+        new(
+            db,
+            publisher ?? NullPublisher.Instance,
+            NullLogger<MessageService>.Instance);
+
     private static ChatDbContext CreateContext(
         SaveChangesInterceptor? interceptor = null)
     {
@@ -106,12 +169,13 @@ public sealed class MessageServiceTests
         Guid userId,
         Guid conversationId,
         Guid clientMessageId,
-        string body)
+        string body,
+        IConversationEventPublisher? publisher = null)
     {
         // Mỗi request dùng một DbContext riêng.
         await using var db = CreateContext();
 
-        return await new MessageService(db).SendAsync(
+        return await CreateService(db, publisher).SendAsync(
             userId,
             conversationId,
             new SendMessageRequest
@@ -119,6 +183,80 @@ public sealed class MessageServiceTests
                 ClientMessageId = clientMessageId,
                 Body = body
             });
+    }
+
+    [Fact]
+    public async Task NewMessage_PublishesOnlyAfterCommit_AndRetryDoesNotPublishAgain()
+    {
+        var (sender, _, conversationId) = await SeedAsync();
+        var publisher = new RecordingPublisher();
+        var clientMessageId = Guid.NewGuid();
+
+        var created = await SendAsync(
+            sender,
+            conversationId,
+            clientMessageId,
+            "publish once",
+            publisher);
+
+        Assert.True(created.IsNewlyCreated);
+        var published = Assert.Single(publisher.Events);
+        Assert.Equal(conversationId, published.ConversationId);
+        Assert.Equal(created.Seq, published.LatestSeq);
+        Assert.NotEqual(Guid.Empty, published.EventId);
+        Assert.True(published.MessageWasCommitted);
+
+        var retry = await SendAsync(
+            sender,
+            conversationId,
+            clientMessageId,
+            "publish once",
+            publisher);
+
+        Assert.False(retry.IsNewlyCreated);
+        Assert.Equal(created.Id, retry.Id);
+        Assert.Single(publisher.Events);
+    }
+
+    [Fact]
+    public async Task PublisherFailureAfterCommit_DoesNotFailSendOrRollbackMessage()
+    {
+        var (sender, _, conversationId) = await SeedAsync();
+        var publisher = new ThrowingPublisher();
+        var clientMessageId = Guid.NewGuid();
+
+        var sent = await SendAsync(
+            sender,
+            conversationId,
+            clientMessageId,
+            "persist despite notification failure",
+            publisher);
+
+        Assert.True(sent.IsNewlyCreated);
+        Assert.True(publisher.MessageWasCommittedWhenCalled);
+        Assert.Equal(1, publisher.Calls);
+
+        await using (var verify = CreateContext())
+        {
+            Assert.True(await verify.Messages.AnyAsync(message => message.Id == sent.Id));
+            Assert.Equal(
+                sent.Seq,
+                await verify.Conversations
+                    .Where(conversation => conversation.Id == conversationId)
+                    .Select(conversation => conversation.LastMessageSeq)
+                    .SingleAsync());
+        }
+
+        // Retry returns the committed message and does not re-run a failed publisher.
+        var retry = await SendAsync(
+            sender,
+            conversationId,
+            clientMessageId,
+            "persist despite notification failure",
+            publisher);
+        Assert.False(retry.IsNewlyCreated);
+        Assert.Equal(sent.Id, retry.Id);
+        Assert.Equal(1, publisher.Calls);
     }
 
     [Fact]
@@ -191,7 +329,7 @@ public sealed class MessageServiceTests
 
         var responses = await Task.WhenAll(tasks);
 
-        Assert.Single(responses.Where(r => r.IsNewlyCreated));
+        Assert.Single(responses, response => response.IsNewlyCreated);
         Assert.Single(responses.Select(r => r.Id).Distinct());
 
         await using var verify = CreateContext();
@@ -268,7 +406,7 @@ public sealed class MessageServiceTests
         }
 
         await using var db = CreateContext();
-        var service = new MessageService(db);
+        var service = CreateService(db);
 
         var latest = await service.GetHistoryAsync(
             a,
@@ -337,7 +475,7 @@ public sealed class MessageServiceTests
         }
 
         await using var readDb = CreateContext();
-        var service = new MessageService(readDb);
+        var service = CreateService(readDb);
 
         // Người chủ động chặn vẫn xem được lịch sử.
         Assert.Single(
@@ -386,7 +524,7 @@ public sealed class MessageServiceTests
         await using var readDb = CreateContext();
 
         var readError = await Assert.ThrowsAsync<MessageServiceException>(
-            () => new MessageService(readDb)
+            () => CreateService(readDb)
                 .GetHistoryAsync(
                     a,
                     conversationId,
@@ -465,13 +603,17 @@ public sealed class MessageServiceTests
     public async Task SaveFailure_RollsBackMessageAndSequence()
     {
         var (a, _, conversationId) = await SeedAsync();
+        var publisher = new RecordingPublisher();
 
         // Tin đã lưu thành công phải còn nguyên sau rollback.
         var first = await SendAsync(
             a,
             conversationId,
             Guid.NewGuid(),
-            "existing message");
+            "existing message",
+            publisher);
+
+        Assert.Single(publisher.Events);
 
         var failedClientId = Guid.NewGuid();
 
@@ -482,7 +624,7 @@ public sealed class MessageServiceTests
         await using (var failingDb = CreateContext(interceptor))
         {
             var error = await Assert.ThrowsAsync<InvalidOperationException>(
-                () => new MessageService(failingDb).SendAsync(
+                () => CreateService(failingDb, publisher).SendAsync(
                     a,
                     conversationId,
                     new SendMessageRequest
@@ -497,6 +639,8 @@ public sealed class MessageServiceTests
 
             Assert.True(interceptor.SequenceIncrementObserved);
         }
+
+        Assert.Single(publisher.Events);
 
         // DbContext mới đọc trạng thái đã commit trong PostgreSQL.
         await using (var verify = CreateContext())
@@ -529,10 +673,13 @@ public sealed class MessageServiceTests
             a,
             conversationId,
             Guid.NewGuid(),
-            "message after rollback");
+            "message after rollback",
+            publisher);
 
         Assert.True(next.IsNewlyCreated);
         Assert.Equal(first.Seq + 1, next.Seq);
+        Assert.Equal(2, publisher.Events.Count);
+        Assert.All(publisher.Events, published => Assert.True(published.MessageWasCommitted));
 
         await using var finalVerify = CreateContext();
 

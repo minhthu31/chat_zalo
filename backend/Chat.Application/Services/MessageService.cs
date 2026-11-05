@@ -9,16 +9,24 @@ using Chat.Application.Interfaces;
 using Chat.Domain.Entities;
 using Chat.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Chat.Application.Services;
 
 public sealed class MessageService : IMessageService
 {
     private readonly ChatDbContext _db;
+    private readonly IConversationEventPublisher _eventPublisher;
+    private readonly ILogger<MessageService> _logger;
 
-    public MessageService(ChatDbContext db)
+    public MessageService(
+        ChatDbContext db,
+        IConversationEventPublisher eventPublisher,
+        ILogger<MessageService> logger)
     {
         _db = db;
+        _eventPublisher = eventPublisher;
+        _logger = logger;
     }
 
     public async Task<MessageResponse> SendAsync(
@@ -128,8 +136,25 @@ public sealed class MessageService : IMessageService
             throw;
         }
 
-        // Tích hợp publisher CHAT-8 tại đây, sau commit.
-        // Không phát event trong nhánh retry trả tin cũ.
+        var eventId = Guid.NewGuid();
+        try
+        {
+            await _eventPublisher.NotifyConversationChangedAsync(
+                conversationId,
+                eventId,
+                message.Seq);
+        }
+        catch (Exception exception)
+        {
+            // Persistence has committed. A notification failure must not make
+            // the API report a failed send for a message that is already stored.
+            _logger.LogError(
+                exception,
+                "Failed to publish ConversationChanged for conversation {ConversationId}, event {EventId}, seq {LatestSeq}.",
+                conversationId,
+                eventId,
+                message.Seq);
+        }
 
         return ToResponse(message, isNewlyCreated: true);
     }
