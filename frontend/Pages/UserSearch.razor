@@ -1,2 +1,102 @@
 @page "/users/search"
-@* TODO: Thành viên được phân công triển khai giao diện UserSearch. *@
+@using global::Chat.Client.Components.Friendship
+@using global::Chat.Client.Models
+@using global::Chat.Client.Services
+@inject IUserApiClient UserApi
+@inject IFriendshipApiClient FriendshipApi
+
+<h1>Tìm người dùng</h1>
+
+<form @onsubmit="SearchAsync">
+    <input @bind="_query" placeholder="Nhập tên đăng nhập" />
+    <button type="submit" disabled="@_searching">@(_searching ? "Đang tìm..." : "Tìm")</button>
+</form>
+
+@if (_error is not null)
+{
+    <p role="alert" style="color: red">@_error</p>
+}
+else if (_searched && _results.Count == 0)
+{
+    <p>Không tìm thấy người dùng nào.</p>
+}
+
+@if (_notice is not null)
+{
+    <p>@_notice</p>
+}
+
+@foreach (var u in _results)
+{
+    <div>
+        @u.DisplayName (@@@u.Username)
+        <button disabled="@(_sending || _sent.Contains(u.Id))" @onclick="() => SendRequestAsync(u)">
+            @(_sent.Contains(u.Id) ? "Đã gửi" : "Kết bạn")
+        </button>
+    </div>
+}
+
+<hr />
+
+<FriendshipPanel @ref="_panel" />
+
+@code {
+    private FriendshipPanel? _panel;
+    private string _query = "";
+    private List<UserDto> _results = new();
+    private readonly HashSet<Guid> _sent = new();
+    private bool _searching;
+    private bool _searched;
+    private bool _sending;
+    private string? _error;
+    private string? _notice;
+
+    private async Task SearchAsync()
+    {
+        _searching = true;
+        _error = null;
+        _notice = null;
+        try
+        {
+            _results = await UserApi.SearchAsync(_query.Trim());
+            _searched = true;
+        }
+        catch (ApiException ex)
+        {
+            _results = new();
+            _searched = false;
+            _error = ex.Code switch
+            {
+                "USERNAME_REQUIRED" => "Vui lòng nhập tên đăng nhập cần tìm.",
+                "INVALID_USERNAME" => "Tên đăng nhập quá dài (tối đa 100 ký tự).",
+                _ => FriendshipErrors.ToMessage(ex.Code)
+            };
+        }
+        finally
+        {
+            _searching = false;
+        }
+    }
+
+    private async Task SendRequestAsync(UserDto user)
+    {
+        _sending = true;
+        _notice = null;
+        try
+        {
+            await FriendshipApi.SendRequestAsync(user.Id);
+            _sent.Add(user.Id);
+            _notice = $"Đã gửi lời mời tới {user.DisplayName}.";
+            if (_panel is not null)
+                await _panel.ReloadAsync();
+        }
+        catch (ApiException ex)
+        {
+            _notice = FriendshipErrors.ToMessage(ex.Code);
+        }
+        finally
+        {
+            _sending = false;
+        }
+    }
+}

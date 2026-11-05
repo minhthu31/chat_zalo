@@ -1,0 +1,114 @@
+@using Chat.Client.Models
+@using Chat.Client.Services
+@inject IFriendshipApiClient FriendshipApi
+
+@if (_loading)
+{
+    <p>Đang tải...</p>
+}
+else if (_loadError is not null)
+{
+    <p role="alert" style="color: red">@_loadError</p>
+    <button @onclick="ReloadAsync">Thử lại</button>
+}
+else
+{
+    @if (_actionError is not null)
+    {
+        <p role="alert" style="color: red">@_actionError</p>
+    }
+
+    <h2>Bạn bè</h2>
+    @if (_friends.Count == 0)
+    {
+        <p>Chưa có bạn bè.</p>
+    }
+    @foreach (var f in _friends)
+    {
+        <div>
+            @f.DisplayName (@@@f.Username)
+            <button disabled="@_busy" @onclick="() => RunAsync(() => FriendshipApi.RemoveAsync(f.UserId))">Hủy kết bạn</button>
+        </div>
+    }
+
+    <h2>Lời mời nhận được</h2>
+    @if (_incoming.Count == 0)
+    {
+        <p>Không có lời mời nào.</p>
+    }
+    @foreach (var f in _incoming)
+    {
+        <div>
+            @f.DisplayName (@@@f.Username)
+            <button disabled="@_busy" @onclick="() => RunAsync(() => FriendshipApi.AcceptAsync(f.UserId))">Chấp nhận</button>
+            <button disabled="@_busy" @onclick="() => RunAsync(() => FriendshipApi.RejectAsync(f.UserId))">Từ chối</button>
+        </div>
+    }
+
+    <h2>Lời mời đã gửi</h2>
+    @if (_outgoing.Count == 0)
+    {
+        <p>Chưa gửi lời mời nào.</p>
+    }
+    @foreach (var f in _outgoing)
+    {
+        <div>
+            @f.DisplayName (@@@f.Username)
+            <button disabled="@_busy" @onclick="() => RunAsync(() => FriendshipApi.RemoveAsync(f.UserId))">Hủy lời mời</button>
+        </div>
+    }
+}
+
+@code {
+    private List<FriendshipDto> _friends = new();
+    private List<FriendshipDto> _incoming = new();
+    private List<FriendshipDto> _outgoing = new();
+    private bool _loading = true;
+    private bool _busy;
+    private string? _loadError;
+    private string? _actionError;
+
+    protected override Task OnInitializedAsync() => ReloadAsync();
+
+    // Public để trang chứa panel (ví dụ UserSearch) gọi làm mới sau khi gửi lời mời
+    public async Task ReloadAsync()
+    {
+        _loadError = null;
+        try
+        {
+            _friends = await FriendshipApi.GetFriendsAsync();
+            var requests = await FriendshipApi.GetRequestsAsync();
+            _incoming = requests.Incoming;
+            _outgoing = requests.Outgoing;
+        }
+        catch (ApiException ex)
+        {
+            _loadError = FriendshipErrors.ToMessage(ex.Code);
+        }
+        finally
+        {
+            _loading = false;
+        }
+        StateHasChanged();
+    }
+
+    // Chạy một thao tác (accept/reject/remove) rồi tải lại danh sách; lỗi hiển thị theo code
+    private async Task RunAsync(Func<Task> action)
+    {
+        _busy = true;
+        _actionError = null;
+        try
+        {
+            await action();
+            await ReloadAsync();
+        }
+        catch (ApiException ex)
+        {
+            _actionError = FriendshipErrors.ToMessage(ex.Code);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

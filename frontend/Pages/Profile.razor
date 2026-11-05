@@ -1,2 +1,116 @@
 @page "/profile"
-@* TODO: Thành viên được phân công triển khai giao diện Profile. *@
+@using System.ComponentModel.DataAnnotations
+@using Microsoft.AspNetCore.Components.Forms
+@using global::Chat.Client.Models
+@using global::Chat.Client.Services
+@inject IUserApiClient UserApi
+
+<h1>Hồ sơ</h1>
+
+@if (_loading)
+{
+    <p>Đang tải...</p>
+}
+else if (_loadError is not null)
+{
+    <p role="alert" style="color: red">@_loadError</p>
+    <button @onclick="LoadAsync">Thử lại</button>
+}
+else
+{
+    <p>Tên đăng nhập: <strong>@_username</strong></p>
+
+    <EditForm Model="_model" OnValidSubmit="SaveAsync" FormName="profile">
+        <DataAnnotationsValidator />
+
+        <div>
+            <label for="displayName">Tên hiển thị</label>
+            <InputText id="displayName" @bind-Value="_model.DisplayName" />
+            <ValidationMessage For="() => _model.DisplayName" />
+        </div>
+
+        @if (_saveError is not null)
+        {
+            <p role="alert" style="color: red">@_saveError</p>
+        }
+        @if (_saved)
+        {
+            <p>Đã lưu.</p>
+        }
+
+        <button type="submit" disabled="@_saving">@(_saving ? "Đang lưu..." : "Lưu")</button>
+    </EditForm>
+}
+
+@code {
+    private readonly ProfileInput _model = new();
+    private string _username = "";
+    private bool _loading = true;
+    private bool _saving;
+    private bool _saved;
+    private string? _loadError;
+    private string? _saveError;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _loadError = null;
+        try
+        {
+            var me = await UserApi.GetProfileAsync();
+            _username = me.Username;
+            _model.DisplayName = me.DisplayName;
+        }
+        catch (ApiException ex)
+        {
+            _loadError = ex.Code switch
+            {
+                "UNAUTHORIZED" => "Bạn cần đăng nhập để xem hồ sơ.",
+                "USER_NOT_FOUND" => "Không tìm thấy tài khoản.",
+                "NETWORK_ERROR" => "Không kết nối được máy chủ.",
+                _ => "Không tải được hồ sơ, vui lòng thử lại."
+            };
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        _saving = true;
+        _saved = false;
+        _saveError = null;
+        try
+        {
+            var updated = await UserApi.UpdateProfileAsync(new UpdateProfileRequest { DisplayName = _model.DisplayName.Trim() });
+            _model.DisplayName = updated.DisplayName;
+            _saved = true;
+        }
+        catch (ApiException ex)
+        {
+            _saveError = ex.Code switch
+            {
+                "INVALID_DISPLAY_NAME" => "Tên hiển thị không hợp lệ (không để trống, tối đa 100 ký tự).",
+                "UNAUTHORIZED" => "Bạn cần đăng nhập.",
+                "INVALID_CSRF_TOKEN" => "Phiên làm việc hết hạn, vui lòng tải lại trang.",
+                "NETWORK_ERROR" => "Không kết nối được máy chủ.",
+                _ => "Không lưu được, vui lòng thử lại."
+            };
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private class ProfileInput
+    {
+        [Required(ErrorMessage = "Vui lòng nhập tên hiển thị.")]
+        [StringLength(100, ErrorMessage = "Tối đa 100 ký tự.")]
+        public string DisplayName { get; set; } = "";
+    }
+}
