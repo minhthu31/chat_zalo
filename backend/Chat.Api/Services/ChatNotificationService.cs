@@ -25,7 +25,6 @@ namespace chat_zalo.Services
 
         public async Task NotifyConversationChangedAsync(Guid conversationId, Guid eventId, long latestSeq)
         {
-            // Lấy danh sách UserId có membership hợp lệ (LeftAt == null) trong database tại thời điểm phát event
             var activeUserIds = await _dbContext.ConversationMembers
                 .Where(cm => cm.ConversationId == conversationId && cm.LeftAt == null)
                 .Select(cm => cm.UserId)
@@ -33,8 +32,8 @@ namespace chat_zalo.Services
 
             if (!activeUserIds.Any()) return;
 
-            // Lấy chính xác các connection đang kết nối VÀ thuộc về user hợp lệ trong DB
-            var activeConnectionIds = _tracker.GetConnectionsForConversation(conversationId, activeUserIds);
+            // Sử dụng đúng tên phương thức GetActiveConnectionsForConversation
+            var activeConnectionIds = _tracker.GetActiveConnectionsForConversation(conversationId, activeUserIds);
 
             if (activeConnectionIds.Any())
             {

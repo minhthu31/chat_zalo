@@ -42,10 +42,12 @@ var sameSiteText = configuration["Authentication:SameSite"];
 var sameSite = Enum.TryParse<SameSiteMode>(sameSiteText, ignoreCase: true, out var parsedSameSite)
     ? parsedSameSite
     : SameSiteMode.Lax;
+
 var securePolicy = builder.Environment.IsDevelopment()
     ? CookieSecurePolicy.SameAsRequest
     : CookieSecurePolicy.Always;
-var cookieExpirationHours = configuration.GetValue<int?>("Authentication:CookieExpirationHours") ?? 8;
+
+var cookieExpirationHours = builder.Configuration.GetValue<int?>("Authentication:CookieExpirationHours") ?? 8;
 
 builder.Services
     .AddAuthentication(options =>
@@ -123,7 +125,6 @@ builder.Services.AddCors(options =>
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IAccountGateway, IdentityAccountGateway>();
 
-
 builder.Services.AddControllers();
 
 builder.Services.Configure<Microsoft.AspNetCore.Mvc.ApiBehaviorOptions>(options =>
@@ -151,7 +152,12 @@ builder.Services.Configure<Microsoft.AspNetCore.Mvc.ApiBehaviorOptions>(options 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddOpenApi();
 builder.Services.AddSignalR();
+
+// === BỔ SUNG ĐĂNG KÝ DI CHO CHAT CONNECTION TRACKER TẠI ĐÂY ===
+builder.Services.AddSingleton<IChatConnectionTracker, ChatConnectionTracker>();
+
 builder.Services.AddScoped<IChatNotificationService, ChatNotificationService>();
+
 var app = builder.Build();
 
 // Middleware order: CORS -> Authentication -> Authorization

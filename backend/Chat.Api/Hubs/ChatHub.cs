@@ -33,7 +33,6 @@ namespace chat_zalo.Hubs
                 throw new HubException("Unauthorized user.");
             }
 
-            // Kiểm tra membership hợp lệ và LeftAt == null
             var isMember = await _dbContext.ConversationMembers
                 .AnyAsync(cm => cm.ConversationId == conversationId
                              && cm.UserId == userId
@@ -45,7 +44,9 @@ namespace chat_zalo.Hubs
             }
 
             string groupName = conversationId.ToString("D");
-            _tracker.AddConnection(Context.ConnectionId, userId, conversationId);
+
+            // Sử dụng đúng tên phương thức AddSubscription
+            _tracker.AddSubscription(Context.ConnectionId, userId, conversationId);
             await Groups.AddToGroupAsync(Context.ConnectionId, groupName);
         }
 
@@ -57,7 +58,9 @@ namespace chat_zalo.Hubs
             }
 
             string groupName = conversationId.ToString("D");
-            _tracker.RemoveConnection(Context.ConnectionId);
+
+            // Sử dụng đúng tên phương thức RemoveSubscription
+            _tracker.RemoveSubscription(Context.ConnectionId, conversationId);
             await Groups.RemoveFromGroupAsync(Context.ConnectionId, groupName);
         }
 
