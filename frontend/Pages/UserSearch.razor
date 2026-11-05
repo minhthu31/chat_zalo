@@ -5,40 +5,49 @@
 @inject IUserApiClient UserApi
 @inject IFriendshipApiClient FriendshipApi
 
-<h1>Tìm người dùng</h1>
+<div class="as-root">
+<div class="page">
+    <div class="card">
+        <h1 class="page-title">Tìm người dùng</h1>
 
-<form @onsubmit="SearchAsync">
-    <input @bind="_query" placeholder="Nhập tên đăng nhập" />
-    <button type="submit" disabled="@_searching">@(_searching ? "Đang tìm..." : "Tìm")</button>
-</form>
+        <form class="search-row" @onsubmit="SearchAsync">
+            <input @bind="_query" placeholder="Nhập tên đăng nhập" />
+            <button type="submit" class="btn btn-primary" disabled="@_searching">@(_searching ? "Đang tìm..." : "Tìm")</button>
+        </form>
 
-@if (_error is not null)
-{
-    <p role="alert" style="color: red">@_error</p>
-}
-else if (_searched && _results.Count == 0)
-{
-    <p>Không tìm thấy người dùng nào.</p>
-}
+        @if (_error is not null)
+        {
+            <p role="alert" class="alert alert-error">@_error</p>
+        }
+        else if (_searched && _results.Count == 0)
+        {
+            <p class="muted center">Không tìm thấy người dùng nào.</p>
+        }
 
-@if (_notice is not null)
-{
-    <p>@_notice</p>
-}
+        @if (_notice is not null)
+        {
+            <p class="alert alert-info">@_notice</p>
+        }
 
-@foreach (var u in _results)
-{
-    <div>
-        @u.DisplayName (@@@u.Username)
-        <button disabled="@(_sending || _sent.Contains(u.Id))" @onclick="() => SendRequestAsync(u)">
-            @(_sent.Contains(u.Id) ? "Đã gửi" : "Kết bạn")
-        </button>
+        @foreach (var u in _results)
+        {
+            <div class="list-item">
+                <span class="person">
+                    <span class="person-name">@u.DisplayName</span>
+                    <span class="muted">@@@u.Username</span>
+                </span>
+                <span class="actions">
+                    <button class="btn btn-primary btn-sm" disabled="@(_sending || _sent.Contains(u.Id))" @onclick="() => SendRequestAsync(u)">
+                        @(_sent.Contains(u.Id) ? "Đã gửi" : "Kết bạn")
+                    </button>
+                </span>
+            </div>
+        }
     </div>
-}
 
-<hr />
-
-<FriendshipPanel @ref="_panel" />
+    <FriendshipPanel @ref="_panel" />
+</div>
+</div>
 
 @code {
     private FriendshipPanel? _panel;

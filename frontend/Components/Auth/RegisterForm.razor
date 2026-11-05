@@ -7,19 +7,19 @@
 <EditForm Model="_model" OnValidSubmit="SubmitAsync" FormName="register">
     <DataAnnotationsValidator />
 
-    <div>
+    <div class="field">
         <label for="username">Tên đăng nhập</label>
         <InputText id="username" @bind-Value="_model.Username" />
         <ValidationMessage For="() => _model.Username" />
     </div>
 
-    <div>
+    <div class="field">
         <label for="email">Email</label>
         <InputText id="email" type="email" @bind-Value="_model.Email" />
         <ValidationMessage For="() => _model.Email" />
     </div>
 
-    <div>
+    <div class="field">
         <label for="password">Mật khẩu</label>
         <InputText id="password" type="password" @bind-Value="_model.Password" />
         <ValidationMessage For="() => _model.Password" />
@@ -27,10 +27,10 @@
 
     @if (_error is not null)
     {
-        <p role="alert" style="color: red">@_error</p>
+        <p role="alert" class="alert alert-error">@_error</p>
     }
 
-    <button type="submit" disabled="@_busy">@(_busy ? "Đang đăng ký..." : "Đăng ký")</button>
+    <button type="submit" class="btn btn-primary btn-block" disabled="@_busy">@(_busy ? "Đang đăng ký..." : "Đăng ký")</button>
 </EditForm>
 
 @code {

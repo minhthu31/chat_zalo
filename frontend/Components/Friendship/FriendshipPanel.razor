@@ -4,59 +4,82 @@
 
 @if (_loading)
 {
-    <p>Đang tải...</p>
+    <div class="card"><p class="muted center">Đang tải...</p></div>
 }
 else if (_loadError is not null)
 {
-    <p role="alert" style="color: red">@_loadError</p>
-    <button @onclick="ReloadAsync">Thử lại</button>
+    <div class="card">
+        <p role="alert" class="alert alert-error">@_loadError</p>
+        <button class="btn btn-primary btn-block" @onclick="ReloadAsync">Thử lại</button>
+    </div>
 }
 else
 {
     @if (_actionError is not null)
     {
-        <p role="alert" style="color: red">@_actionError</p>
+        <p role="alert" class="alert alert-error">@_actionError</p>
     }
 
-    <h2>Bạn bè</h2>
-    @if (_friends.Count == 0)
-    {
-        <p>Chưa có bạn bè.</p>
-    }
-    @foreach (var f in _friends)
-    {
-        <div>
-            @f.DisplayName (@@@f.Username)
-            <button disabled="@_busy" @onclick="() => RunAsync(() => FriendshipApi.RemoveAsync(f.UserId))">Hủy kết bạn</button>
-        </div>
-    }
+    <div class="card">
+        <h2 class="section-title">Bạn bè (@_friends.Count)</h2>
+        @if (_friends.Count == 0)
+        {
+            <p class="muted">Chưa có bạn bè.</p>
+        }
+        @foreach (var f in _friends)
+        {
+            <div class="list-item">
+                <span class="person">
+                    <span class="person-name">@f.DisplayName</span>
+                    <span class="muted">@@@f.Username</span>
+                </span>
+                <span class="actions">
+                    <button class="btn btn-danger btn-sm" disabled="@_busy" @onclick="() => RunAsync(() => FriendshipApi.RemoveAsync(f.UserId))">Hủy kết bạn</button>
+                </span>
+            </div>
+        }
+    </div>
 
-    <h2>Lời mời nhận được</h2>
-    @if (_incoming.Count == 0)
-    {
-        <p>Không có lời mời nào.</p>
-    }
-    @foreach (var f in _incoming)
-    {
-        <div>
-            @f.DisplayName (@@@f.Username)
-            <button disabled="@_busy" @onclick="() => RunAsync(() => FriendshipApi.AcceptAsync(f.UserId))">Chấp nhận</button>
-            <button disabled="@_busy" @onclick="() => RunAsync(() => FriendshipApi.RejectAsync(f.UserId))">Từ chối</button>
-        </div>
-    }
+    <div class="card">
+        <h2 class="section-title">Lời mời nhận được (@_incoming.Count)</h2>
+        @if (_incoming.Count == 0)
+        {
+            <p class="muted">Không có lời mời nào.</p>
+        }
+        @foreach (var f in _incoming)
+        {
+            <div class="list-item">
+                <span class="person">
+                    <span class="person-name">@f.DisplayName</span>
+                    <span class="muted">@@@f.Username</span>
+                </span>
+                <span class="actions">
+                    <button class="btn btn-primary btn-sm" disabled="@_busy" @onclick="() => RunAsync(() => FriendshipApi.AcceptAsync(f.UserId))">Chấp nhận</button>
+                    <button class="btn btn-danger btn-sm" disabled="@_busy" @onclick="() => RunAsync(() => FriendshipApi.RejectAsync(f.UserId))">Từ chối</button>
+                </span>
+            </div>
+        }
+    </div>
 
-    <h2>Lời mời đã gửi</h2>
-    @if (_outgoing.Count == 0)
-    {
-        <p>Chưa gửi lời mời nào.</p>
-    }
-    @foreach (var f in _outgoing)
-    {
-        <div>
-            @f.DisplayName (@@@f.Username)
-            <button disabled="@_busy" @onclick="() => RunAsync(() => FriendshipApi.RemoveAsync(f.UserId))">Hủy lời mời</button>
-        </div>
-    }
+    <div class="card">
+        <h2 class="section-title">Lời mời đã gửi (@_outgoing.Count)</h2>
+        @if (_outgoing.Count == 0)
+        {
+            <p class="muted">Chưa gửi lời mời nào.</p>
+        }
+        @foreach (var f in _outgoing)
+        {
+            <div class="list-item">
+                <span class="person">
+                    <span class="person-name">@f.DisplayName</span>
+                    <span class="muted">@@@f.Username</span>
+                </span>
+                <span class="actions">
+                    <button class="btn btn-sm" disabled="@_busy" @onclick="() => RunAsync(() => FriendshipApi.RemoveAsync(f.UserId))">Hủy lời mời</button>
+                </span>
+            </div>
+        }
+    </div>
 }
 
 @code {

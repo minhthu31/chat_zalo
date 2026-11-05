@@ -1,1 +1,243 @@
-/* TODO: CSS chung do thành viên FE phụ trách. */
+/* ===== Giao diện Auth / Profile / Kết bạn (phần FE: Auth + Social) =====
+   Mọi style nằm trong .as-root nên KHÔNG ảnh hưởng các trang khác.
+   Muốn dùng: bọc trang bằng <div class="as-root">. */
+
+.as-root {
+    --brand: #0068ff;
+    --brand-dark: #0052cc;
+    --brand-soft: #e8f1ff;
+    --bg: #f0f2f5;
+    --surface: #ffffff;
+    --text: #1c2b33;
+    --muted: #6b7a85;
+    --border: #d9e0e6;
+    --danger: #d93025;
+    --danger-soft: #fdecea;
+    --success: #1e8e3e;
+    --success-soft: #e6f4ea;
+    --radius: 12px;
+
+    min-height: 100vh;
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Segoe UI", system-ui, -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-size: 16px;
+    line-height: 1.5;
+
+    a {
+        color: var(--brand);
+        text-decoration: none;
+    }
+
+    a:hover {
+        text-decoration: underline;
+    }
+
+    /* ----- Bố cục trang ----- */
+    .page {
+        max-width: 640px;
+        margin: 0 auto;
+        padding: 2rem 1rem;
+    }
+
+    .page-narrow {
+        max-width: 420px;
+    }
+
+    .card {
+        background: var(--surface);
+        border-radius: var(--radius);
+        box-shadow: 0 2px 12px rgba(28, 43, 51, 0.08);
+        padding: 1.5rem;
+        margin-bottom: 1.25rem;
+    }
+
+    .page-title {
+        margin: 0 0 1.25rem;
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: var(--brand);
+        text-align: center;
+    }
+
+    .section-title {
+        margin: 0 0 0.75rem;
+        font-size: 1.05rem;
+        font-weight: 600;
+    }
+
+    .muted {
+        color: var(--muted);
+    }
+
+    .center {
+        text-align: center;
+    }
+
+    /* ----- Form ----- */
+    .field {
+        margin-bottom: 1rem;
+    }
+
+    .field label {
+        display: block;
+        margin-bottom: 0.3rem;
+        font-size: 0.9rem;
+        font-weight: 600;
+    }
+
+    .field input,
+    .search-row input {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 0.6rem 0.75rem;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        font-size: 1rem;
+        background: var(--surface);
+        color: var(--text);
+    }
+
+    .field input:focus,
+    .search-row input:focus {
+        outline: none;
+        border-color: var(--brand);
+        box-shadow: 0 0 0 3px var(--brand-soft);
+    }
+
+    /* Blazor tự gắn các class này khi kiểm tra dữ liệu */
+    .field input.invalid {
+        border-color: var(--danger);
+    }
+
+    .validation-message {
+        margin-top: 0.25rem;
+        font-size: 0.85rem;
+        color: var(--danger);
+    }
+
+    /* ----- Nút ----- */
+    .btn {
+        display: inline-block;
+        padding: 0.55rem 1rem;
+        border: 1px solid transparent;
+        border-radius: 8px;
+        font-size: 0.95rem;
+        font-weight: 600;
+        cursor: pointer;
+        background: var(--brand-soft);
+        color: var(--brand);
+    }
+
+    .btn:hover:not(:disabled) {
+        filter: brightness(0.96);
+    }
+
+    .btn:disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
+    }
+
+    .btn-primary {
+        background: var(--brand);
+        color: #ffffff;
+    }
+
+    .btn-primary:hover:not(:disabled) {
+        background: var(--brand-dark);
+        filter: none;
+    }
+
+    .btn-danger {
+        background: var(--danger-soft);
+        color: var(--danger);
+    }
+
+    .btn-block {
+        width: 100%;
+    }
+
+    .btn-sm {
+        padding: 0.3rem 0.7rem;
+        font-size: 0.85rem;
+    }
+
+    /* ----- Thông báo ----- */
+    .alert {
+        margin: 0 0 1rem;
+        padding: 0.65rem 0.85rem;
+        border-radius: 8px;
+        font-size: 0.92rem;
+    }
+
+    .alert-error {
+        background: var(--danger-soft);
+        color: var(--danger);
+    }
+
+    .alert-success {
+        background: var(--success-soft);
+        color: var(--success);
+    }
+
+    .alert-info {
+        background: var(--brand-soft);
+        color: var(--brand-dark);
+    }
+
+    /* ----- Tìm kiếm và danh sách người ----- */
+    .search-row {
+        display: flex;
+        gap: 0.5rem;
+        margin-bottom: 1rem;
+    }
+
+    .search-row input {
+        flex: 1;
+    }
+
+    .list-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.75rem;
+        padding: 0.65rem 0;
+        border-bottom: 1px solid var(--border);
+    }
+
+    .list-item:last-child {
+        border-bottom: none;
+    }
+
+    .person {
+        min-width: 0;
+        overflow-wrap: anywhere;
+    }
+
+    .person-name {
+        font-weight: 600;
+    }
+
+    .actions {
+        display: flex;
+        flex-shrink: 0;
+        gap: 0.4rem;
+    }
+
+    .profile-username {
+        margin: 0 0 1rem;
+        color: var(--muted);
+    }
+
+    /* ----- Màn hình nhỏ ----- */
+    @media (max-width: 480px) {
+        .page {
+            padding: 1rem;
+        }
+
+        .list-item {
+            flex-direction: column;
+            align-items: flex-start;
+        }
+    }
+}

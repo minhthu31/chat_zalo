@@ -2,11 +2,17 @@
 @using global::Chat.Client.Components.Auth
 @inject NavigationManager Nav
 
-<h1>Đăng nhập</h1>
+<div class="as-root">
+    <div class="page page-narrow">
+        <div class="card">
+            <h1 class="page-title">Đăng nhập</h1>
 
-<LoginForm OnSuccess="GoHome" />
+            <LoginForm OnSuccess="GoHome" />
 
-<p>Chưa có tài khoản? <a href="register">Đăng ký</a></p>
+            <p class="muted center">Chưa có tài khoản? <a href="register">Đăng ký</a></p>
+        </div>
+    </div>
+</div>
 
 @code {
     private void GoHome() => Nav.NavigateTo("/");

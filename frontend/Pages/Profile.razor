@@ -5,42 +5,48 @@
 @using global::Chat.Client.Services
 @inject IUserApiClient UserApi
 
-<h1>Hồ sơ</h1>
+<div class="as-root">
+<div class="page page-narrow">
+    <div class="card">
+        <h1 class="page-title">Hồ sơ</h1>
 
-@if (_loading)
-{
-    <p>Đang tải...</p>
-}
-else if (_loadError is not null)
-{
-    <p role="alert" style="color: red">@_loadError</p>
-    <button @onclick="LoadAsync">Thử lại</button>
-}
-else
-{
-    <p>Tên đăng nhập: <strong>@_username</strong></p>
-
-    <EditForm Model="_model" OnValidSubmit="SaveAsync" FormName="profile">
-        <DataAnnotationsValidator />
-
-        <div>
-            <label for="displayName">Tên hiển thị</label>
-            <InputText id="displayName" @bind-Value="_model.DisplayName" />
-            <ValidationMessage For="() => _model.DisplayName" />
-        </div>
-
-        @if (_saveError is not null)
+        @if (_loading)
         {
-            <p role="alert" style="color: red">@_saveError</p>
+            <p class="muted center">Đang tải...</p>
         }
-        @if (_saved)
+        else if (_loadError is not null)
         {
-            <p>Đã lưu.</p>
+            <p role="alert" class="alert alert-error">@_loadError</p>
+            <button class="btn btn-primary btn-block" @onclick="LoadAsync">Thử lại</button>
         }
+        else
+        {
+            <p class="profile-username">Tên đăng nhập: <strong>@_username</strong></p>
 
-        <button type="submit" disabled="@_saving">@(_saving ? "Đang lưu..." : "Lưu")</button>
-    </EditForm>
-}
+            <EditForm Model="_model" OnValidSubmit="SaveAsync" FormName="profile">
+                <DataAnnotationsValidator />
+
+                <div class="field">
+                    <label for="displayName">Tên hiển thị</label>
+                    <InputText id="displayName" @bind-Value="_model.DisplayName" />
+                    <ValidationMessage For="() => _model.DisplayName" />
+                </div>
+
+                @if (_saveError is not null)
+                {
+                    <p role="alert" class="alert alert-error">@_saveError</p>
+                }
+                @if (_saved)
+                {
+                    <p class="alert alert-success">Đã lưu.</p>
+                }
+
+                <button type="submit" class="btn btn-primary btn-block" disabled="@_saving">@(_saving ? "Đang lưu..." : "Lưu")</button>
+            </EditForm>
+        }
+    </div>
+</div>
+</div>
 
 @code {
     private readonly ProfileInput _model = new();

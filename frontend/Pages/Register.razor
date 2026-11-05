@@ -2,11 +2,17 @@
 @using global::Chat.Client.Components.Auth
 @inject NavigationManager Nav
 
-<h1>Đăng ký</h1>
+<div class="as-root">
+    <div class="page page-narrow">
+        <div class="card">
+            <h1 class="page-title">Đăng ký</h1>
 
-<RegisterForm OnSuccess="GoLogin" />
+            <RegisterForm OnSuccess="GoLogin" />
 
-<p>Đã có tài khoản? <a href="login">Đăng nhập</a></p>
+            <p class="muted center">Đã có tài khoản? <a href="login">Đăng nhập</a></p>
+        </div>
+    </div>
+</div>
 
 @code {
     // Đăng ký không tự đăng nhập nên chuyển sang trang Login
