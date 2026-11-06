@@ -7,83 +7,178 @@
 @inject IFriendshipApiClient FriendshipApi
 
 <div class="as-root">
-<div class="page">
-    <UserBar />
+    <div class="page">
+        <UserBar />
 
-    <div class="card">
-        <h1 class="page-title">Tìm người dùng</h1>
+        <div class="card">
+            <h1 class="page-title">Tìm người dùng</h1>
 
-        <form class="search-row" @onsubmit="SearchAsync">
-            <input @bind="_query" placeholder="Nhập tên đăng nhập" />
-            <button type="submit" class="btn btn-primary" disabled="@_searching">@(_searching ? "Đang tìm..." : "Tìm")</button>
-        </form>
+            <form class="search-row"
+                  @onsubmit="SearchAsync"
+                  @onsubmit:preventDefault>
+                <input @bind="_query"
+                       placeholder="Nhập tên đăng nhập" />
 
-        @if (_error is not null)
-        {
-            <p role="alert" class="alert alert-error">@_error</p>
-        }
-        else if (_searched && _results.Count == 0)
-        {
-            <p class="muted center">Không tìm thấy người dùng nào.</p>
-        }
+                <button type="submit"
+                        class="btn btn-primary"
+                        disabled="@_searching">
+                    @(_searching ? "Đang tìm..." : "Tìm")
+                </button>
+            </form>
 
-        @if (_notice is not null)
-        {
-            <p class="alert alert-info">@_notice</p>
-        }
+            @if (_error is not null)
+            {
+                <p role="alert" class="alert alert-error">
+                    @_error
+                </p>
+            }
+            else if (_searched && _results.Count == 0)
+            {
+                <p class="muted center">
+                    Không tìm thấy người dùng nào.
+                </p>
+            }
 
-        @foreach (var u in _results)
-        {
-            <div class="list-item">
-                <span class="person">
-                    <span class="avatar">@AvatarText.From(u.DisplayName)</span>
-                    <span class="person-text">
-                        <span class="person-name">@u.DisplayName</span>
-                        <span class="muted">@@@u.Username</span>
+            @if (_notice is not null)
+            {
+                <p class="alert alert-info">@_notice</p>
+            }
+
+            @foreach (var user in _results)
+            {
+                <div class="list-item" @key="user.Id">
+                    <span class="person">
+                        <span class="avatar">
+                            @AvatarText.From(user.DisplayName)
+                        </span>
+
+                        <span class="person-text">
+                            <span class="person-name">
+                                @user.DisplayName
+                            </span>
+                            <span class="muted">@@@user.Username</span>
+                        </span>
                     </span>
-                </span>
-                <span class="actions">
-                    <button class="btn btn-primary btn-sm" disabled="@(_sending || _sent.Contains(u.Id))" @onclick="() => SendRequestAsync(u)">
-                        @(_sent.Contains(u.Id) ? "Đã gửi" : "Kết bạn")
-                    </button>
-                </span>
-            </div>
-        }
-    </div>
 
-    <FriendshipPanel @ref="_panel" />
-</div>
+                    <span class="actions">
+                        <button type="button"
+                                class="btn btn-primary btn-sm"
+                                disabled="@IsRequestDisabled(user.Id)"
+                                @onclick="() => SendRequestAsync(user)">
+                            @RequestLabel(user.Id)
+                        </button>
+                    </span>
+                </div>
+            }
+        </div>
+
+        <FriendshipPanel @ref="_panel"
+                         OnChanged="OnFriendshipsChangedAsync" />
+    </div>
 </div>
 
 @code {
     private FriendshipPanel? _panel;
+
     private string _query = "";
     private List<UserDto> _results = new();
+
     private readonly HashSet<Guid> _sent = new();
+    private readonly HashSet<Guid> _friends = new();
+    private readonly HashSet<Guid> _incoming = new();
+
+    private bool _relationsReady;
     private bool _searching;
     private bool _searched;
     private bool _sending;
+
     private string? _error;
     private string? _notice;
 
+    private bool IsRequestDisabled(Guid userId) =>
+        _sending
+        || !_relationsReady
+        || _friends.Contains(userId)
+        || _sent.Contains(userId)
+        || _incoming.Contains(userId);
+
+    private string RequestLabel(Guid userId)
+    {
+        if (!_relationsReady)
+            return "Chờ đồng bộ";
+
+        if (_friends.Contains(userId))
+            return "Bạn bè";
+
+        if (_sent.Contains(userId))
+            return "Đã gửi";
+
+        if (_incoming.Contains(userId))
+            return "Đã nhận lời mời";
+
+        return "Kết bạn";
+    }
+
+    private async Task RefreshFriendshipStateAsync()
+    {
+        _relationsReady = false;
+        _error = null;
+
+        try
+        {
+            var friends = await FriendshipApi.GetFriendsAsync();
+            var requests = await FriendshipApi.GetRequestsAsync();
+
+            _friends.Clear();
+            _friends.UnionWith(friends.Select(f => f.UserId));
+
+            _sent.Clear();
+            _sent.UnionWith(requests.Outgoing.Select(f => f.UserId));
+
+            _incoming.Clear();
+            _incoming.UnionWith(requests.Incoming.Select(f => f.UserId));
+
+            _relationsReady = true;
+        }
+        catch (ApiException ex)
+        {
+            _error = FriendshipErrors.ToMessage(ex.Code);
+        }
+    }
+
+    private async Task OnFriendshipsChangedAsync()
+    {
+        _notice = null;
+        await RefreshFriendshipStateAsync();
+    }
+
     private async Task SearchAsync()
     {
+        if (_searching)
+            return;
+
         _searching = true;
         _error = null;
         _notice = null;
+
         try
         {
             _results = await UserApi.SearchAsync(_query.Trim());
             _searched = true;
+
+            await RefreshFriendshipStateAsync();
         }
         catch (ApiException ex)
         {
             _results = new();
             _searched = false;
+
             _error = ex.Code switch
             {
-                "USERNAME_REQUIRED" => "Vui lòng nhập tên đăng nhập cần tìm.",
-                "INVALID_USERNAME" => "Tên đăng nhập quá dài (tối đa 100 ký tự).",
+                "USERNAME_REQUIRED" =>
+                    "Vui lòng nhập tên đăng nhập cần tìm.",
+                "INVALID_USERNAME" =>
+                    "Tên đăng nhập quá dài (tối đa 100 ký tự).",
                 _ => FriendshipErrors.ToMessage(ex.Code)
             };
         }
@@ -95,19 +190,31 @@
 
     private async Task SendRequestAsync(UserDto user)
     {
+        if (IsRequestDisabled(user.Id))
+            return;
+
         _sending = true;
+        _error = null;
         _notice = null;
+
         try
         {
             await FriendshipApi.SendRequestAsync(user.Id);
+
             _sent.Add(user.Id);
             _notice = $"Đã gửi lời mời tới {user.DisplayName}.";
+
             if (_panel is not null)
                 await _panel.ReloadAsync();
+
+            await RefreshFriendshipStateAsync();
         }
         catch (ApiException ex)
         {
             _notice = FriendshipErrors.ToMessage(ex.Code);
+
+            // Trạng thái có thể đã đổi ở tài khoản hoặc cửa sổ khác.
+            await RefreshFriendshipStateAsync();
         }
         finally
         {

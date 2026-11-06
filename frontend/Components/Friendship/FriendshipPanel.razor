@@ -1,90 +1,150 @@
-@using Chat.Client.Models
-@using Chat.Client.Services
+@using global::Chat.Client.Models
+@using global::Chat.Client.Services
 @inject IFriendshipApiClient FriendshipApi
 
 @if (_loading)
 {
-    <div class="card"><p class="muted center">Đang tải...</p></div>
+    <div class="card">
+        <p class="muted center">Đang tải...</p>
+    </div>
 }
 else if (_loadError is not null)
 {
     <div class="card">
-        <p role="alert" class="alert alert-error">@_loadError</p>
-        <button class="btn btn-primary btn-block" @onclick="ReloadAsync">Thử lại</button>
+        <p role="alert" class="alert alert-error">
+            @_loadError
+        </p>
+
+        <button type="button"
+                class="btn btn-primary btn-block"
+                @onclick="ReloadAsync">
+            Thử lại
+        </button>
     </div>
 }
 else
 {
     @if (_actionError is not null)
     {
-        <p role="alert" class="alert alert-error">@_actionError</p>
+        <p role="alert" class="alert alert-error">
+            @_actionError
+        </p>
     }
 
     <div class="card">
         <h2 class="section-title">Bạn bè (@_friends.Count)</h2>
+
         @if (_friends.Count == 0)
         {
             <p class="muted">Chưa có bạn bè.</p>
         }
-        @foreach (var f in _friends)
+
+        @foreach (var friend in _friends)
         {
-            <div class="list-item">
+            <div class="list-item" @key="friend.UserId">
                 <span class="person">
-                    <span class="avatar">@AvatarText.From(f.DisplayName)</span>
+                    <span class="avatar">
+                        @AvatarText.From(friend.DisplayName)
+                    </span>
+
                     <span class="person-text">
-                        <span class="person-name">@f.DisplayName</span>
-                        <span class="muted">@@@f.Username</span>
+                        <span class="person-name">
+                            @friend.DisplayName
+                        </span>
+                        <span class="muted">@@@friend.Username</span>
                     </span>
                 </span>
+
                 <span class="actions">
-                    <button class="btn btn-danger btn-sm" disabled="@_busy" @onclick="() => RunAsync(() => FriendshipApi.RemoveAsync(f.UserId))">Hủy kết bạn</button>
+                    <button type="button"
+                            class="btn btn-danger btn-sm"
+                            disabled="@_busy"
+                            @onclick="() => RunAsync(() => FriendshipApi.RemoveAsync(friend.UserId))">
+                        Hủy kết bạn
+                    </button>
                 </span>
             </div>
         }
     </div>
 
     <div class="card">
-        <h2 class="section-title">Lời mời nhận được (@_incoming.Count)</h2>
+        <h2 class="section-title">
+            Lời mời nhận được (@_incoming.Count)
+        </h2>
+
         @if (_incoming.Count == 0)
         {
             <p class="muted">Không có lời mời nào.</p>
         }
-        @foreach (var f in _incoming)
+
+        @foreach (var request in _incoming)
         {
-            <div class="list-item">
+            <div class="list-item" @key="request.UserId">
                 <span class="person">
-                    <span class="avatar">@AvatarText.From(f.DisplayName)</span>
+                    <span class="avatar">
+                        @AvatarText.From(request.DisplayName)
+                    </span>
+
                     <span class="person-text">
-                        <span class="person-name">@f.DisplayName</span>
-                        <span class="muted">@@@f.Username</span>
+                        <span class="person-name">
+                            @request.DisplayName
+                        </span>
+                        <span class="muted">@@@request.Username</span>
                     </span>
                 </span>
+
                 <span class="actions">
-                    <button class="btn btn-primary btn-sm" disabled="@_busy" @onclick="() => RunAsync(() => FriendshipApi.AcceptAsync(f.UserId))">Chấp nhận</button>
-                    <button class="btn btn-danger btn-sm" disabled="@_busy" @onclick="() => RunAsync(() => FriendshipApi.RejectAsync(f.UserId))">Từ chối</button>
+                    <button type="button"
+                            class="btn btn-primary btn-sm"
+                            disabled="@_busy"
+                            @onclick="() => RunAsync(() => FriendshipApi.AcceptAsync(request.UserId))">
+                        Chấp nhận
+                    </button>
+
+                    <button type="button"
+                            class="btn btn-danger btn-sm"
+                            disabled="@_busy"
+                            @onclick="() => RunAsync(() => FriendshipApi.RejectAsync(request.UserId))">
+                        Từ chối
+                    </button>
                 </span>
             </div>
         }
     </div>
 
     <div class="card">
-        <h2 class="section-title">Lời mời đã gửi (@_outgoing.Count)</h2>
+        <h2 class="section-title">
+            Lời mời đã gửi (@_outgoing.Count)
+        </h2>
+
         @if (_outgoing.Count == 0)
         {
             <p class="muted">Chưa gửi lời mời nào.</p>
         }
-        @foreach (var f in _outgoing)
+
+        @foreach (var request in _outgoing)
         {
-            <div class="list-item">
+            <div class="list-item" @key="request.UserId">
                 <span class="person">
-                    <span class="avatar">@AvatarText.From(f.DisplayName)</span>
+                    <span class="avatar">
+                        @AvatarText.From(request.DisplayName)
+                    </span>
+
                     <span class="person-text">
-                        <span class="person-name">@f.DisplayName</span>
-                        <span class="muted">@@@f.Username</span>
+                        <span class="person-name">
+                            @request.DisplayName
+                        </span>
+                        <span class="muted">@@@request.Username</span>
                     </span>
                 </span>
+
                 <span class="actions">
-                    <button class="btn btn-sm" disabled="@_busy" @onclick="() => RunAsync(() => FriendshipApi.RemoveAsync(f.UserId))">Hủy lời mời</button>
+                    <button type="button"
+                            class="btn btn-sm"
+                            disabled="@_busy"
+                            @onclick="() => RunAsync(() => FriendshipApi.RemoveAsync(request.UserId))">
+                        Hủy lời mời
+                    </button>
                 </span>
             </div>
         }
@@ -92,24 +152,32 @@ else
 }
 
 @code {
+    [Parameter]
+    public EventCallback OnChanged { get; set; }
+
     private List<FriendshipDto> _friends = new();
     private List<FriendshipDto> _incoming = new();
     private List<FriendshipDto> _outgoing = new();
+
     private bool _loading = true;
     private bool _busy;
+
     private string? _loadError;
     private string? _actionError;
 
     protected override Task OnInitializedAsync() => ReloadAsync();
 
-    // Public để trang chứa panel (ví dụ UserSearch) gọi làm mới sau khi gửi lời mời
     public async Task ReloadAsync()
     {
+        _loading = true;
         _loadError = null;
+
         try
         {
-            _friends = await FriendshipApi.GetFriendsAsync();
+            var friends = await FriendshipApi.GetFriendsAsync();
             var requests = await FriendshipApi.GetRequestsAsync();
+
+            _friends = friends;
             _incoming = requests.Incoming;
             _outgoing = requests.Outgoing;
         }
@@ -121,22 +189,33 @@ else
         {
             _loading = false;
         }
-        StateHasChanged();
+
+        await InvokeAsync(StateHasChanged);
     }
 
-    // Chạy một thao tác (accept/reject/remove) rồi tải lại danh sách; lỗi hiển thị theo code
     private async Task RunAsync(Func<Task> action)
     {
+        if (_busy)
+            return;
+
         _busy = true;
         _actionError = null;
+
         try
         {
             await action();
             await ReloadAsync();
+
+            // Cập nhật các nút ở trang tìm kiếm sau khi quan hệ thay đổi.
+            await OnChanged.InvokeAsync();
         }
         catch (ApiException ex)
         {
             _actionError = FriendshipErrors.ToMessage(ex.Code);
+
+            // Đồng bộ lại nếu trạng thái đã đổi từ cửa sổ khác.
+            await ReloadAsync();
+            await OnChanged.InvokeAsync();
         }
         finally
         {
