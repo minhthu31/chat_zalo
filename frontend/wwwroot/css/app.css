@@ -178,6 +178,30 @@
         box-shadow: 0 0 0 4px var(--brand-soft);
     }
 
+    /* Ô tích "Hiện mật khẩu" dưới ô nhập mật khẩu */
+    .field label.show-pw {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        margin: 0.4rem 0 0;
+        font-size: 0.85rem;
+        font-weight: 400;
+        color: var(--muted);
+        cursor: pointer;
+    }
+
+    .field .show-pw input {
+        width: auto;
+        margin: 0;
+        cursor: pointer;
+    }
+
+    .field .hint {
+        margin: 0.35rem 0 0;
+        font-size: 0.8rem;
+        color: var(--muted);
+    }
+
     /* Blazor tự gắn các class này khi kiểm tra dữ liệu */
     .field input.invalid {
         border-color: var(--danger);

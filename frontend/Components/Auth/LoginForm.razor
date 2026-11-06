@@ -15,8 +15,9 @@
 
     <div class="field">
         <label for="password">Mật khẩu</label>
-        <InputText id="password" type="password" @bind-Value="_model.Password" />
+        <InputText id="password" type="@(_showPassword ? "text" : "password")" autocomplete="current-password" @bind-Value="_model.Password" />
         <ValidationMessage For="() => _model.Password" />
+        <label class="show-pw"><input type="checkbox" @bind="_showPassword" /> Hiện mật khẩu</label>
     </div>
 
     @if (_error is not null)
@@ -34,6 +35,9 @@
     private readonly LoginInput _model = new();
     private string? _error;
     private bool _busy;
+
+    // Tích vào ô "Hiện mật khẩu" thì ô nhập đổi từ type="password" sang type="text" để nhìn thấy chữ đã gõ
+    private bool _showPassword;
 
     private async Task SubmitAsync()
     {

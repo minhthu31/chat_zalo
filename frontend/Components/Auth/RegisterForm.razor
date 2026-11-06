@@ -21,8 +21,10 @@
 
     <div class="field">
         <label for="password">Mật khẩu</label>
-        <InputText id="password" type="password" @bind-Value="_model.Password" />
+        <InputText id="password" type="@(_showPassword ? "text" : "password")" autocomplete="new-password" @bind-Value="_model.Password" />
         <ValidationMessage For="() => _model.Password" />
+        <label class="show-pw"><input type="checkbox" @bind="_showPassword" /> Hiện mật khẩu</label>
+        <p class="hint">Mật khẩu cần ít nhất 6 ký tự, có chữ hoa, chữ số và ký tự đặc biệt (ví dụ Passw0rd!x).</p>
     </div>
 
     @if (_error is not null)
@@ -40,6 +42,9 @@
     private readonly RegisterInput _model = new();
     private string? _error;
     private bool _busy;
+
+    // Tích vào ô "Hiện mật khẩu" thì ô nhập đổi từ type="password" sang type="text" để nhìn thấy chữ đã gõ
+    private bool _showPassword;
 
     private async Task SubmitAsync()
     {
