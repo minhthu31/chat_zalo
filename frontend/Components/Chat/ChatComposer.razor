@@ -1,0 +1,22 @@
+<div class="composer">
+    <textarea @bind="_body" @bind:event="oninput" @onkeydown="OnKeyDown"
+              placeholder="Nhập tin nhắn… (Enter để gửi, Shift+Enter xuống dòng)"
+              maxlength="4000" rows="1" disabled="@Disabled"></textarea>
+    <button @onclick="SendAsync" disabled="@(Disabled || string.IsNullOrWhiteSpace(_body))">Gửi <span>➤</span></button>
+</div>
+@code {
+    private string _body = "";
+    [Parameter] public bool Disabled { get; set; }
+    [Parameter] public EventCallback<string> OnSend { get; set; }
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !e.ShiftKey) await SendAsync();
+    }
+    private async Task SendAsync()
+    {
+        var body = _body.Trim();
+        if (body.Length == 0 || Disabled) return;
+        _body = "";
+        await OnSend.InvokeAsync(body);
+    }
+}

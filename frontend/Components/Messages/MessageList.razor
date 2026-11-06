@@ -1,0 +1,12 @@
+@using global::Chat.Client.Models.Messages
+<div class="message-list">
+    @if (Items.Count == 0)
+    {
+        <div class="empty-chat"><div class="empty-icon">✉</div><strong>Chưa có tin nhắn</strong><span>Hãy gửi tin nhắn đầu tiên.</span></div>
+    }
+    @foreach (var message in Items) { <MessageBubble Message="message" CurrentUserId="CurrentUserId" /> }
+</div>
+@code {
+    [Parameter] public IReadOnlyList<MessageResponse> Items { get; set; } = [];
+    [Parameter] public Guid? CurrentUserId { get; set; }
+}

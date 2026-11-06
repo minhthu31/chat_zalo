@@ -1,0 +1,11 @@
+@using global::Chat.Client.Models.Messages
+<div class="message-row @(Message.SenderUserId == CurrentUserId ? "mine" : "theirs")">
+    <div class="bubble">
+        <div class="message-content">@Message.Body</div>
+        <div class="message-meta">#@Message.Seq · @Message.CreatedAt.ToLocalTime().ToString("HH:mm")</div>
+    </div>
+</div>
+@code {
+    [Parameter, EditorRequired] public MessageResponse Message { get; set; } = default!;
+    [Parameter] public Guid? CurrentUserId { get; set; }
+}

@@ -1,2 +1,229 @@
 @page "/chat"
-@* TODO: Thành viên được phân công triển khai giao diện Chat. *@
+@implements IAsyncDisposable
+@using global::Chat.Client.Models.Auth
+@using global::Chat.Client.Models.Conversations
+@using global::Chat.Client.Models.Messages
+@using global::Chat.Client.Services
+@using global::Chat.Client.State
+@using Microsoft.AspNetCore.SignalR.Client
+@inject ConversationsApiClient ConversationsApi
+@inject MessagesApiClient MessagesApi
+@inject ChatApiClient Api
+@inject ChatHubClient Hub
+@inject ChatState State
+@inject IConfiguration Configuration
+@inject NavigationManager Navigation
+
+<PageTitle>Chat cá nhân</PageTitle>
+<div class="chat-page">
+    <header class="chat-heading">
+        <div><div class="eyebrow">CHAT_ZALO · S1-11</div><h1>Tin nhắn</h1><p>Trò chuyện cá nhân 1–1</p></div>
+        <div class="status @(IsConnected ? "online" : "offline")"><i></i>@(IsConnected ? "Realtime đã kết nối" : "Chưa kết nối")</div>
+    </header>
+    @if (!string.IsNullOrWhiteSpace(Error))
+    {
+        <div class="alert" role="alert"><strong>@ErrorCode</strong> @Error</div>
+    }
+    <section class="chat-layout">
+        <aside class="sidebar">
+            <div class="sidebar-title"><h2>Hội thoại</h2><span>@State.Conversations.Count</span></div>
+            <div class="search"><span>⌕</span><input placeholder="Tìm theo mã hội thoại" @bind="_search" @bind:event="oninput" /></div>
+            @if (LoadingConversations) { <div class="state-message">Đang tải hội thoại…</div> }
+            else
+            {
+                <ConversationList Items="FilteredConversations" ActiveId="State.ActiveConversationId" OnSelect="SelectConversationAsync" />
+            }
+        </aside>
+        <main class="chat-main">
+            @if (ActiveConversation is null)
+            {
+                <div class="empty-chat"><div class="empty-icon">☁</div><strong>Chưa có hội thoại</strong><span>Hội thoại sẽ hiển thị khi tài khoản của bạn có cuộc trò chuyện.</span></div>
+            }
+            else
+            {
+                <div class="chat-topbar">
+                    <div class="avatar large">@ActiveConversation.Id.ToString()[..2].ToUpperInvariant()</div>
+                    <div><strong>Hội thoại @ActiveConversation.Id.ToString()[..8]</strong><small>@ActiveConversation.Kind · Sequence cuối: @ActiveConversation.LastMessageSeq</small></div>
+                    <span class="mode">@((State.UseMockData) ? "MOCK DATA" : "BACKEND API")</span>
+                </div>
+                @if (LoadingMessages) { <div class="state-message">Đang tải tin nhắn…</div> }
+                else
+                {
+                    <div class="history">
+                        <button class="older" @onclick="LoadOlderAsync" disabled="@(!HasOlder || LoadingOlder)">
+                            @(LoadingOlder ? "Đang tải…" : "Tải tin nhắn cũ hơn")
+                        </button>
+                        <MessageList Items="State.Messages" CurrentUserId="CurrentUser?.Id" />
+                    </div>
+                }
+                @if (!string.IsNullOrWhiteSpace(SendError)) { <div class="send-error">@SendError</div> }
+                <ChatComposer Disabled="Sending" OnSend="SendAsync" />
+            }
+        </main>
+    </section>
+    <footer>Frontend không truy cập PostgreSQL · @(State.UseMockData ? "Đang dùng dữ liệu minh họa" : "Dữ liệu từ Backend")</footer>
+</div>
+
+@code {
+    private CurrentUserResponse? CurrentUser;
+    private bool LoadingConversations, LoadingMessages, LoadingOlder, Sending, IsConnected, HasOlder;
+    private string? Error, ErrorCode, SendError;
+    private string _search = "";
+    private Guid? _joinedConversation;
+
+    private IReadOnlyList<ConversationDto> FilteredConversations =>
+        State.Conversations.Where(x => x.Id.ToString().Contains(_search, StringComparison.OrdinalIgnoreCase)).ToList();
+    private ConversationDto? ActiveConversation =>
+        State.Conversations.FirstOrDefault(x => x.Id == State.ActiveConversationId);
+
+    protected override async Task OnInitializedAsync()
+    {
+        State.UseMockData = Configuration.GetValue<bool>("UseMockChatData");
+        if (State.UseMockData)
+            CurrentUser = new CurrentUserResponse(
+                Guid.Parse("cccccccc-0000-0000-0000-000000000001"), "demo", "Tài khoản demo");
+        await LoadConversationsAsync();
+        if (!State.UseMockData)
+        {
+            try
+            {
+                CurrentUser = await Api.GetCurrentUserAsync();
+                Hub.ConversationChanged += HandleConversationChangedAsync;
+                Hub.Reconnected += HandleReconnectedAsync;
+                Hub.Closed += HandleClosedAsync;
+                await Hub.StartAsync(new Uri(Configuration["ApiBaseUrl"] ?? Navigation.BaseUri));
+                IsConnected = Hub.State == HubConnectionState.Connected;
+            }
+            catch (Exception ex) { SetError(ex); }
+        }
+        if (State.ActiveConversationId is Guid id) await SelectConversationAsync(id);
+    }
+
+    private async Task LoadConversationsAsync()
+    {
+        LoadingConversations = true; ClearError();
+        try
+        {
+            State.SetConversations(State.UseMockData ? ChatState.MockConversations : await ConversationsApi.GetConversationsAsync());
+        }
+        catch (Exception ex) { SetError(ex); }
+        finally { LoadingConversations = false; }
+    }
+
+    private async Task SelectConversationAsync(Guid id)
+    {
+        if (_joinedConversation is Guid previous && previous != id && !State.UseMockData)
+            await Hub.LeaveConversationAsync(previous);
+        State.SelectConversation(id);
+        _joinedConversation = id;
+        LoadingMessages = true; SendError = null;
+        try
+        {
+            if (State.UseMockData)
+            {
+                State.ReplaceMessages(ChatState.MockMessages(id));
+                HasOlder = true;
+            }
+            else
+            {
+                await Hub.JoinConversationAsync(id);
+                var items = await MessagesApi.GetLatestAsync(id, limit: 20);
+                State.ReplaceMessages(items);
+                HasOlder = items.Count == 20;
+            }
+        }
+        catch (Exception ex) { SetError(ex); }
+        finally { LoadingMessages = false; }
+    }
+
+    private async Task LoadOlderAsync()
+    {
+        if (ActiveConversation is null || State.OldestSequence is not long before || LoadingOlder || !HasOlder) return;
+        LoadingOlder = true;
+        try
+        {
+            if (State.UseMockData) HasOlder = false;
+            else
+            {
+                var older = await MessagesApi.GetOlderAsync(ActiveConversation.Id, before, limit: 20);
+                State.MergeMessages(older);
+                HasOlder = older.Count == 20;
+            }
+        }
+        catch (Exception ex) { SetError(ex); }
+        finally { LoadingOlder = false; }
+    }
+
+    private async Task SendAsync(string body)
+    {
+        if (ActiveConversation is null) return;
+        Sending = true; SendError = null;
+        var clientMessageId = Guid.NewGuid();
+        try
+        {
+            if (State.UseMockData)
+            {
+                var seq = (State.LastSequence == 0 ? 0 : State.LastSequence) + 1;
+                State.MergeMessages([new MessageResponse(clientMessageId, ActiveConversation.Id,
+                    CurrentUser?.Id ?? Guid.Empty, seq, body, DateTimeOffset.UtcNow)]);
+            }
+            else
+            {
+                var sent = await MessagesApi.SendAsync(ActiveConversation.Id, body, clientMessageId);
+                State.MergeMessages([sent]);
+            }
+        }
+        catch (Exception ex) { SendError = ex.Message; }
+        finally { Sending = false; }
+    }
+
+    private async Task HandleConversationChangedAsync(ConversationChangedEvent evt)
+    {
+        if (State.ActiveConversationId != evt.ConversationId) return;
+        await SyncAfterAsync(evt.ConversationId);
+    }
+
+    private async Task SyncAfterAsync(Guid conversationId)
+    {
+        try
+        {
+            var latest = await MessagesApi.GetLatestAsync(conversationId, afterSeq: State.LastSequence, limit: 100);
+            State.MergeMessages(latest);
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception ex) { SetError(ex); await InvokeAsync(StateHasChanged); }
+    }
+
+    private async Task HandleReconnectedAsync()
+    {
+        IsConnected = true;
+        if (_joinedConversation is Guid id)
+        {
+            await Hub.JoinConversationAsync(id);
+            await SyncAfterAsync(id);
+        }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task HandleClosedAsync(Exception? ex)
+    {
+        IsConnected = false;
+        if (ex is not null) SetError(ex);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void ClearError() { Error = null; ErrorCode = null; }
+    private void SetError(Exception ex)
+    {
+        Error = ex.Message;
+        ErrorCode = ex is HttpRequestException ? "API_ERROR" : "CHAT_ERROR";
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        Hub.ConversationChanged -= HandleConversationChangedAsync;
+        Hub.Reconnected -= HandleReconnectedAsync;
+        Hub.Closed -= HandleClosedAsync;
+        if (_joinedConversation is Guid id) await Hub.LeaveConversationAsync(id);
+    }
+}

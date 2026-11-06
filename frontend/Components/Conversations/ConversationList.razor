@@ -1,0 +1,20 @@
+@using global::Chat.Client.Models.Conversations
+<div class="conversation-list">
+    @if (Items.Count == 0) { <div class="empty-small">Chưa có hội thoại.</div> }
+    @foreach (var item in Items)
+    {
+        <button class="conversation-item @(item.Id == ActiveId ? "active" : "")" @onclick="() => OnSelect.InvokeAsync(item.Id)">
+            <span class="avatar">@item.Id.ToString()[..2].ToUpperInvariant()</span>
+            <span class="conversation-copy">
+                <strong>Hội thoại @item.Id.ToString()[..8]</strong>
+                <small>@item.Kind · Seq @item.LastMessageSeq</small>
+            </span>
+            <span class="chevron">›</span>
+        </button>
+    }
+</div>
+@code {
+    [Parameter] public IReadOnlyList<ConversationDto> Items { get; set; } = [];
+    [Parameter] public Guid? ActiveId { get; set; }
+    [Parameter] public EventCallback<Guid> OnSelect { get; set; }
+}
