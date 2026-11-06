@@ -1,0 +1,15 @@
+using System.Text.Json.Serialization;
+
+namespace Chat.Application.DTOs.Messages;
+
+public sealed class MessageResponse
+{
+    public Guid Id { get; set; }
+    public Guid ConversationId { get; set; }
+    public Guid SenderUserId { get; set; }
+    public long Seq { get; set; }
+    public string Body { get; set; } = string.Empty;
+    public DateTimeOffset CreatedAt { get; set; }
+    [JsonIgnore]
+    public bool IsNewlyCreated { get; set; }
+}

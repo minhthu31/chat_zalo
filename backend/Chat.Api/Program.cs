@@ -1,4 +1,5 @@
 using Chat.Api.Controllers;
+using Chat.Api.Hubs;
 using Chat.Application.DTOs.Auth;
 using Chat.Application.Interfaces;
 using Chat.Application.Services;
@@ -86,6 +87,8 @@ builder.Services
     });
 
 builder.Services.AddAuthorization();
+builder.Services.AddSignalR();
+builder.Services.AddScoped<ConversationNotifications>();
 
 // CSRF contract: GET /api/auth/csrf returns the request token in JSON;
 // unsafe requests send it back in the X-CSRF-TOKEN header.
@@ -120,6 +123,7 @@ builder.Services.AddCors(options =>
 // S1-02 application abstractions
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IConversationService, ConversationService>();
+builder.Services.AddScoped<IMessageService, MessageService>();
 builder.Services.AddScoped<IBlockService, BlockService>();
 builder.Services.AddScoped<IFriendshipService, FriendshipService>();
 builder.Services.AddScoped<IAccountGateway, IdentityAccountGateway>();
@@ -159,6 +163,24 @@ var app = builder.Build();
 
 // Middleware order: CORS -> Authentication -> Authorization
 app.UseCors("Frontend");
+// CORS does not enforce WebSocket origins. Browsers must use the API's own
+// origin or an explicitly configured FE origin for every hub transport.
+app.Use(async (context, next) =>
+{
+    if (context.Request.Path.StartsWithSegments("/hubs/chat")
+        && context.Request.Headers.TryGetValue("Origin", out var origin))
+    {
+        var ownOrigin = $"{context.Request.Scheme}://{context.Request.Host}";
+        if (!string.Equals(origin.ToString(), ownOrigin, StringComparison.OrdinalIgnoreCase)
+            && !allowedOrigins.Contains(origin.ToString(), StringComparer.OrdinalIgnoreCase))
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await context.Response.WriteAsJsonAsync(new AuthErrorResponse { Code = "FORBIDDEN", Message = "Origin is not allowed." });
+            return;
+        }
+    }
+    await next(context);
+});
 app.UseAuthentication();
 app.UseAuthorization();
 
@@ -169,6 +191,7 @@ if (app.Environment.IsDevelopment())
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapControllers();
+app.MapHub<ChatHub>("/hubs/chat", options => options.CloseOnAuthenticationExpiration = true);
 
 app.Run();
 
