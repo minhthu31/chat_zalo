@@ -43,6 +43,12 @@ namespace chat_zalo.Hubs
                 throw new HubException("You are not a member of this conversation.");
             }
 
+            var blocked = await _dbContext.UserBlocks.AsNoTracking().AnyAsync(b =>
+                b.BlockedUserId == userId && _dbContext.ConversationMembers.Any(peer =>
+                    peer.ConversationId == conversationId && peer.UserId == b.BlockerUserId));
+            if (blocked)
+                throw new HubException("Conversation access denied.");
+
             string groupName = conversationId.ToString("D");
 
             // Sử dụng đúng tên phương thức AddSubscription

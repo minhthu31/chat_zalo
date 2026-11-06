@@ -27,6 +27,9 @@ namespace chat_zalo.Services
         {
             var activeUserIds = await _dbContext.ConversationMembers
                 .Where(cm => cm.ConversationId == conversationId && cm.LeftAt == null)
+                .Where(cm => !_dbContext.UserBlocks.Any(b => b.BlockedUserId == cm.UserId
+                    && _dbContext.ConversationMembers.Any(peer =>
+                        peer.ConversationId == conversationId && peer.UserId == b.BlockerUserId)))
                 .Select(cm => cm.UserId)
                 .ToListAsync();
 
