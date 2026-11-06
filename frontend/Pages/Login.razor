@@ -21,5 +21,6 @@
 </div>
 
 @code {
-    private void GoHome() => Nav.NavigateTo("/");
+    // Tạm chuyển về hồ sơ vì trang /chat chưa có nội dung; đổi sang "/chat" khi trang chat xong
+    private void GoHome() => Nav.NavigateTo("/profile");
 }

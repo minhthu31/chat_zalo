@@ -3,7 +3,7 @@
 @inject AuthState Auth
 @inject NavigationManager Nav
 
-<button type="button" class="btn btn-danger btn-block" disabled="@_busy" @onclick="LogoutAsync">
+<button type="button" class="@CssClass" disabled="@_busy" @onclick="LogoutAsync">
     @(_busy ? "Đang đăng xuất..." : "Đăng xuất")
 </button>
 
@@ -13,6 +13,9 @@
 }
 
 @code {
+    // Cho trang chứa nút chọn kiểu hiển thị (nút to hay nút nhỏ trên thanh điều hướng)
+    [Parameter] public string CssClass { get; set; } = "btn btn-danger btn-block";
+
     private bool _busy;
     private string? _error;
 

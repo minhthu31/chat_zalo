@@ -345,10 +345,62 @@
         color: var(--muted);
     }
 
-    .logout-row {
-        margin-top: 1.25rem;
-        padding-top: 1.25rem;
-        border-top: 1px solid var(--border);
+    /* ----- Thanh điều hướng trên cùng (Hồ sơ / Tìm bạn / Đăng xuất) ----- */
+    .userbar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.75rem;
+        margin-bottom: 1.25rem;
+        padding: 0.6rem 1rem;
+        background: var(--surface);
+        border: 1px solid rgba(223, 230, 238, 0.7);
+        border-radius: var(--radius);
+        box-shadow: var(--shadow);
+    }
+
+    .userbar-links {
+        display: flex;
+        gap: 0.25rem;
+    }
+
+    .userbar-links a {
+        padding: 0.4rem 0.85rem;
+        border-radius: 999px;
+        color: var(--muted);
+        font-size: 0.92rem;
+    }
+
+    .userbar-links a:hover {
+        background: var(--field-bg);
+        text-decoration: none;
+    }
+
+    .userbar-links a.active {
+        background: var(--brand-soft);
+        color: var(--brand);
+    }
+
+    .userbar-user {
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+    }
+
+    .userbar-name {
+        max-width: 140px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 0.9rem;
+        font-weight: 600;
+    }
+
+    .avatar-sm {
+        width: 32px;
+        height: 32px;
+        font-size: 0.9rem;
     }
 
     /* ----- Màn hình nhỏ ----- */

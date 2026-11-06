@@ -1,0 +1,50 @@
+@implements IDisposable
+@using Chat.Client.Services
+@using Chat.Client.State
+@inject AuthState Auth
+
+<div class="userbar">
+    <nav class="userbar-links">
+        <NavLink href="/profile" ActiveClass="active">Hồ sơ</NavLink>
+        <NavLink href="/users/search" ActiveClass="active">Tìm bạn</NavLink>
+    </nav>
+
+    <div class="userbar-user">
+        @if (Auth.CurrentUser is not null)
+        {
+            <span class="avatar avatar-sm">@AvatarText.From(Auth.CurrentUser.DisplayName)</span>
+            <span class="userbar-name">@Auth.CurrentUser.DisplayName</span>
+            <LogoutButton CssClass="btn btn-danger btn-sm" />
+        }
+        else if (Auth.IsInitialized)
+        {
+            <a href="/login">Đăng nhập</a>
+        }
+    </div>
+</div>
+
+@code {
+    protected override async Task OnInitializedAsync()
+    {
+        // Đăng ký nhận thông báo để thanh tự cập nhật khi đăng nhập/đăng xuất
+        Auth.OnChange += HandleAuthChanged;
+
+        // Mở lại trang (F5) thì AuthState trống: hỏi server xem còn đăng nhập không
+        if (!Auth.IsInitialized)
+        {
+            try
+            {
+                await Auth.InitializeAsync();
+            }
+            catch (ApiException)
+            {
+                // Lỗi mạng: thanh hiện link "Đăng nhập", các trang tự báo lỗi riêng
+            }
+        }
+    }
+
+    private void HandleAuthChanged() => InvokeAsync(StateHasChanged);
+
+    // Gỡ đăng ký khi component biến mất, nếu không sẽ bị gọi lại mãi
+    public void Dispose() => Auth.OnChange -= HandleAuthChanged;
+}
