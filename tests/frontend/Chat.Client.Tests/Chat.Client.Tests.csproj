@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.13.0" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.0.2" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="10.0.0" />
+    <Compile Include="../../../frontend/Models/Conversations/ConversationDto.cs" Link="Models/ConversationDto.cs" />
+    <Compile Include="../../../frontend/Models/Messages/MessageDtos.cs" Link="Models/MessageDtos.cs" />
+    <Compile Include="../../../frontend/Models/AuthModels.cs" Link="Models/AuthModels.cs" />
+    <Compile Include="../../../frontend/State/ChatState.cs" Link="State/ChatState.cs" />
+    <Compile Include="../../../frontend/State/ChatSession.cs" Link="State/ChatSession.cs" />
+    <Compile Include="../../../frontend/Services/ApiRequestSender.cs" Link="Services/ApiRequestSender.cs" />
+    <Compile Include="../../../frontend/Services/ApiException.cs" Link="Services/ApiException.cs" />
+    <Compile Include="../../../frontend/Services/MessagesApiClient.cs" Link="Services/MessagesApiClient.cs" />
+    <Compile Include="../../../frontend/Services/ConversationsApiClient.cs" Link="Services/ConversationsApiClient.cs" />
+  </ItemGroup>
+</Project>

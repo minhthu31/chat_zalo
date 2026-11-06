@@ -1,0 +1,15 @@
+@using global::Chat.Client.Models
+<ul class="messages" aria-label="Tin nhắn">
+    @if (Items.Count == 0) { <li>Chưa có tin nhắn.</li> }
+    @foreach (var message in Items)
+    {
+        <li @key="message.Id" class="@(message.SenderUserId == CurrentUserId ? "mine" : "")">
+            <strong>@(message.SenderUserId == CurrentUserId ? "Bạn" : "Đối phương")</strong>
+            <p>@message.Body</p><small>#@message.Seq · @message.CreatedAt.ToLocalTime().ToString("HH:mm")</small>
+        </li>
+    }
+</ul>
+@code {
+    [Parameter] public IReadOnlyList<MessageResponse> Items { get; set; } = [];
+    [Parameter] public Guid CurrentUserId { get; set; }
+}

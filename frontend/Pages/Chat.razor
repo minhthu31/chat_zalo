@@ -1,2 +1,266 @@
-@page "/chat"
-@* TODO: Thành viên được phân công triển khai giao diện Chat. *@
+﻿@page "/chat"
+@using global::Chat.Client.Models
+@using global::Chat.Client.Services
+@using global::Chat.Client.State
+@using global::Chat.Client.Components.Auth
+@using global::Chat.Client.Components.Messaging
+@using global::Chat.Client.Components.Conversations
+@using global::Chat.Client.Components.Messages
+@using Microsoft.AspNetCore.SignalR.Client
+@implements IAsyncDisposable
+@inject AuthState Auth
+@inject ApiRequestSender RequestSender
+@inject IFriendshipApiClient FriendshipApi
+@inject HttpClient Http
+
+<PageTitle>Tin nhắn · chat_zalo</PageTitle>
+<link rel="stylesheet" href="css/chat.css" />
+<div class="as-root chat-root">
+<section class="chat-shell">
+    @if (!initializing) { <UserBar /> }
+    <header class="chat-heading">
+        <div class="brand-mark">C</div>
+        <div><span class="chat-brand">chat_zalo</span><h1>Tin nhắn</h1><p>Kết nối bạn bè, trò chuyện mọi lúc</p></div>
+    </header>
+    @if (initializing) { <p class="alert alert-info" role="status">Đang kiểm tra phiên đăng nhập…</p> }
+    else if (!Auth.IsAuthenticated)
+    {
+        <div class="card chat-welcome"><h2>Đăng nhập để trò chuyện</h2><p class="muted">Tin nhắn và hội thoại được lưu bằng API trên hệ thống.</p><a class="btn btn-primary" href="/login">Đăng nhập</a></div>
+    }
+    else if (session is not null)
+    {
+        <div class="chat-connection" role="status"><span class="connection-label"><i class="@(connected ? "online" : "")"></i>@connectionStatus</span>
+            <button class="btn btn-sm" @onclick="RefreshAsync" disabled="@refreshing">@(refreshing ? "Đang đồng bộ…" : "Kết nối / đồng bộ lại")</button>
+        </div>
+        <div class="chat-layout">
+            <aside class="chat-sidebar">
+                <h2 class="section-title">Hội thoại <small>(@conversations.Count)</small></h2>
+                <form class="new-conversation" @onsubmit="CreateAsync" @onsubmit:preventDefault>
+                    <label for="chat-friend">Bắt đầu với bạn bè</label>
+                    <select id="chat-friend" @bind="targetFriend" disabled="@(creating || refreshing)">
+                        <option value="@Guid.Empty">Chọn bạn bè</option>
+                        @foreach (var friend in friends) { <option value="@friend.UserId">@friend.DisplayName (@friend.Username)</option> }
+                    </select>
+                    <button class="btn btn-primary btn-sm" type="submit" disabled="@(targetFriend == Guid.Empty || creating)">@(creating ? "Đang mở…" : "Mở trò chuyện")</button>
+                    @if (!refreshing && friends.Count == 0) { <small class="muted">Chưa có bạn bè. <a href="/users/search">Tìm và kết bạn</a> để bắt đầu.</small> }
+                </form>
+                @if (refreshing && conversations.Count == 0) { <p class="muted">Đang tải hội thoại…</p> }
+                else
+                {
+                    <ConversationList Items="conversations" Selected="@(session.State.SelectedId ?? Guid.Empty)" OnSelect="SelectAsync" />
+                }
+            </aside>
+            <main class="chat-main">
+                @if (session.State.SelectedId is Guid id && session.State.Active is { } active)
+                {
+                    <div class="chat-topbar"><span class="avatar">@id.ToString()[..2].ToUpperInvariant()</span><div><h2>Hội thoại @id.ToString()[..8]</h2><small class="muted">Trò chuyện cá nhân · Tin nhắn được lưu trên hệ thống</small></div></div>
+                    @if (active.Loading) { <p class="chat-loading" role="status">Đang tải tin nhắn…</p> }
+                    <button class="btn btn-sm older" @onclick="LoadOlderAsync" disabled="@(!active.HasOlder || active.Loading)">Tải tin nhắn cũ hơn</button>
+                    <MessageList Items="active.Messages" CurrentUserId="Auth.CurrentUser!.Id" />
+                    @if (errors.TryGetValue(id, out var sendError)) { <p class="alert alert-error" role="alert">@sendError</p> }
+                    <ChatComposer @key="id" Body="active.Draft" BodyChanged="value => active.Draft = value"
+                                  Retry="@(active.Pending is not null)" Disabled="@(active.Sending || !active.Initialized)" OnSend="SendAsync" />
+                }
+                else { <div class="chat-empty"><span class="brand-mark">C</span><h2>Chào mừng đến chat_zalo</h2><p>Chọn một hội thoại hoặc bắt đầu trò chuyện với bạn bè.</p></div> }
+            </main>
+        </div>
+    }
+    @if (error is not null) { <p class="alert alert-error chat-global-error" role="alert">@error</p> }
+</section>
+</div>
+
+@code {
+    private ChatSession? session;
+    private ChatHubClient? hub;
+    private ConversationsApiClient? conversationsApi;
+    private List<ConversationDto> conversations = [];
+    private List<FriendshipDto> friends = [];
+    private Guid targetFriend;
+    private readonly Dictionary<Guid, string> errors = [];
+    private bool initializing = true, refreshing, creating, disposed, connected;
+    private string connectionStatus = "Chưa kết nối";
+    private string? error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Auth.OnChange += OnAuthChanged;
+        conversationsApi = new ConversationsApiClient(RequestSender);
+        session = new ChatSession(new MessagesApiClient(RequestSender));
+        hub = new ChatHubClient(Http);
+        hub.ConversationChanged += OnChanged;
+        hub.Reconnected += OnReconnected;
+        hub.StatusChanged += OnConnectionChanged;
+        hub.SubscriptionFailed += OnSubscriptionFailed;
+        try { if (!Auth.IsInitialized) await Auth.InitializeAsync(); }
+        catch (Exception ex) { error = Describe(ex); }
+        initializing = false;
+        if (Auth.IsAuthenticated) await RefreshAsync();
+    }
+
+    private void OnAuthChanged()
+    {
+        if (!Auth.IsAuthenticated) _ = InvokeAsync(async () =>
+        {
+            session?.Reset();
+            conversations.Clear();
+            friends.Clear();
+            errors.Clear();
+            if (hub is not null) await hub.DisposeAsync();
+            if (!disposed) StateHasChanged();
+        });
+    }
+
+    private Task OnConnectionChanged(HubConnectionState state) => InvokeAsync(() =>
+    {
+        connected = state == HubConnectionState.Connected;
+        connectionStatus = state switch
+        {
+            HubConnectionState.Connected => "Realtime đã kết nối",
+            HubConnectionState.Connecting => "Đang kết nối…",
+            HubConnectionState.Reconnecting => "Mất kết nối — đang thử nối lại…",
+            _ => "Mất kết nối — bấm kết nối lại; vẫn có thể gửi qua API"
+        };
+        if (!disposed) StateHasChanged();
+    });
+
+    private Task OnSubscriptionFailed(Exception ex) => InvokeAsync(() =>
+    {
+        if (disposed) return;
+        error = "Không đăng ký được thông báo cho một hội thoại. Bấm đồng bộ lại để thử lại. " + Describe(ex);
+        StateHasChanged();
+    });
+
+    private Task OnChanged(ConversationChanged change) => InvokeAsync(async () =>
+    {
+        if (disposed || session is null || !Auth.IsAuthenticated) return;
+        if (!conversations.Any(c => c.Id == change.ConversationId)) await RefreshAsync();
+        conversations = conversations.Select(c => c.Id == change.ConversationId
+            ? c with { LastMessageSeq = Math.Max(c.LastMessageSeq, change.LatestSeq) } : c).ToList();
+        if (session.State.SelectedId == change.ConversationId)
+            await RunAsync(change.ConversationId, () => session.SyncAsync(change.ConversationId));
+        if (!disposed) StateHasChanged();
+    });
+
+    private Task OnReconnected() => InvokeAsync(async () =>
+    {
+        if (disposed || session is null || !Auth.IsAuthenticated) return;
+        if (session.State.SelectedId is Guid id) await RunAsync(id, () => session.SyncAsync(id));
+        if (!disposed) StateHasChanged();
+    });
+
+    private async Task RefreshAsync()
+    {
+        if (refreshing || disposed || session is null || conversationsApi is null || !Auth.IsAuthenticated) return;
+        var owner = session;
+        refreshing = true;
+        error = null;
+        try
+        {
+            var items = await conversationsApi.GetAsync();
+            if (disposed || !Auth.IsAuthenticated) return;
+            conversations = items.Where(c => c.Kind == "Direct").ToList();
+            try { friends = await FriendshipApi.GetFriendsAsync(); }
+            catch (Exception ex) { error = "Chưa tải được danh sách bạn bè: " + Describe(ex); }
+            if (disposed || !Auth.IsAuthenticated) return;
+            if (owner.State.SelectedId is Guid old && !conversations.Any(c => c.Id == old)) owner.State.SelectedId = null;
+            // Failure of the hub must not prevent reading or sending through REST.
+            if (hub is not null)
+            {
+                try
+                {
+                    await hub.StartAsync();
+                    foreach (var item in conversations) await hub.JoinAsync(item.Id);
+                }
+                catch (Exception ex) { error = "Realtime chưa sẵn sàng: " + Describe(ex); }
+            }
+            if (disposed || !Auth.IsAuthenticated) return;
+            if (owner.State.SelectedId is Guid id) await RunAsync(id, () => owner.SyncAsync(id));
+            else if (conversations.Count > 0) await SelectAsync(conversations[0].Id);
+        }
+        catch (Exception ex)
+        {
+            if (!disposed)
+            {
+                if (ex is ApiException { StatusCode: 401 })
+                {
+                    owner.Reset();
+                    conversations.Clear();
+                    friends.Clear();
+                }
+                error = Describe(ex);
+            }
+        }
+        finally { refreshing = false; }
+    }
+
+    private async Task CreateAsync()
+    {
+        if (creating || targetFriend == Guid.Empty || conversationsApi is null || session is null) return;
+        creating = true;
+        error = null;
+        try
+        {
+            var conversation = await conversationsApi.CreateDirectAsync(targetFriend);
+            if (disposed || !Auth.IsAuthenticated) return;
+            if (!conversations.Any(c => c.Id == conversation.Id)) conversations.Add(conversation);
+            if (hub is not null)
+                try { await hub.JoinAsync(conversation.Id); }
+                catch (Exception ex) { error = "Realtime chưa sẵn sàng: " + Describe(ex); }
+            await SelectAsync(conversation.Id);
+        }
+        catch (Exception ex) { if (!disposed) error = Describe(ex); }
+        finally { creating = false; }
+    }
+
+    private async Task SelectAsync(Guid id)
+    {
+        if (disposed || session is null || !Auth.IsAuthenticated) return;
+        var owner = session;
+        owner.State.SelectedId = id;
+        await RunAsync(id, () => owner.SyncAsync(id));
+    }
+
+    private Task LoadOlderAsync()
+    {
+        var owner = session;
+        return owner?.State.SelectedId is Guid id ? RunAsync(id, () => owner.LoadOlderAsync(id)) : Task.CompletedTask;
+    }
+    private Task SendAsync()
+    {
+        var owner = session;
+        return owner?.State.SelectedId is Guid id ? RunAsync(id, () => owner.SendAsync(id)) : Task.CompletedTask;
+    }
+
+    private async Task RunAsync(Guid id, Func<Task> operation)
+    {
+        var owner = session;
+        errors.Remove(id);
+        try { await operation(); }
+        catch (Exception ex)
+        {
+            if (disposed || owner != session) return;
+            if (ex is ApiException { StatusCode: 401 or 403 })
+            {
+                owner?.Reset();
+                conversations.Clear();
+                error = Describe(ex);
+            }
+            else errors[id] = Describe(ex);
+        }
+    }
+
+    private static string Describe(Exception ex) => ex switch
+    {
+        ApiException { StatusCode: 401 } => "Phiên đăng nhập hết hạn. Vui lòng đăng nhập lại.",
+        ApiException api => $"{api.Code}: {api.Message}",
+        _ => "Không thể hoàn tất yêu cầu. Kiểm tra kết nối và thử lại."
+    };
+
+    public async ValueTask DisposeAsync()
+    {
+        disposed = true;
+        session?.Reset();
+        Auth.OnChange -= OnAuthChanged;
+        if (hub is not null) await hub.DisposeAsync();
+    }
+}
