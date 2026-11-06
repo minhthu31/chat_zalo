@@ -1,2 +1,26 @@
 @page "/login"
-@* TODO: Thành viên được phân công triển khai giao diện Login. *@
+@using global::Chat.Client.Components.Auth
+@inject NavigationManager Nav
+
+<div class="as-root auth-center">
+    <div class="page page-narrow">
+        <div class="brand">
+            <div class="brand-logo">C</div>
+            <div class="brand-name">chat_zalo</div>
+            <div class="brand-tagline">Kết nối bạn bè, trò chuyện mọi lúc</div>
+        </div>
+
+        <div class="card">
+            <h1 class="page-title">Đăng nhập</h1>
+
+            <LoginForm OnSuccess="GoHome" />
+
+            <p class="muted center">Chưa có tài khoản? <a href="register">Đăng ký</a></p>
+        </div>
+    </div>
+</div>
+
+@code {
+    // Tạm chuyển về hồ sơ vì trang /chat chưa có nội dung; đổi sang "/chat" khi trang chat xong
+    private void GoHome() => Nav.NavigateTo("/profile");
+}

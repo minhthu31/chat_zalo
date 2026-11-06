@@ -1,2 +1,142 @@
 @page "/profile"
-@* TODO: Thành viên được phân công triển khai giao diện Profile. *@
+@using System.ComponentModel.DataAnnotations
+@using Microsoft.AspNetCore.Components.Forms
+@using global::Chat.Client.Components.Auth
+@using global::Chat.Client.Models
+@using global::Chat.Client.Services
+@using global::Chat.Client.State
+@inject IUserApiClient UserApi
+@inject AuthState Auth
+
+<div class="as-root">
+<div class="page page-narrow">
+    <UserBar />
+
+    <div class="card">
+        <h1 class="page-title">Hồ sơ</h1>
+
+        @if (_loading)
+        {
+            <p class="muted center">Đang tải...</p>
+        }
+        else if (_loadError is not null)
+        {
+            <p role="alert" class="alert alert-error">@_loadError</p>
+            <button class="btn btn-primary btn-block" @onclick="LoadAsync">Thử lại</button>
+        }
+        else
+        {
+            <div class="avatar avatar-lg">@AvatarText.From(_model.DisplayName)</div>
+            <p class="profile-username">@@@_username</p>
+
+            <EditForm Model="_model" OnValidSubmit="SaveAsync" FormName="profile">
+                <DataAnnotationsValidator />
+
+                <div class="field">
+                    <label for="displayName">Tên hiển thị</label>
+                    <InputText id="displayName" @bind-Value="_model.DisplayName" />
+                    <ValidationMessage For="() => _model.DisplayName" />
+                </div>
+
+                @if (_saveError is not null)
+                {
+                    <p role="alert" class="alert alert-error">@_saveError</p>
+                }
+                @if (_saved)
+                {
+                    <p class="alert alert-success">Đã lưu.</p>
+                }
+
+                <button type="submit" class="btn btn-primary btn-block" disabled="@_saving">@(_saving ? "Đang lưu..." : "Lưu")</button>
+            </EditForm>
+        }
+    </div>
+</div>
+</div>
+
+@code {
+    private readonly ProfileInput _model = new();
+    private string _username = "";
+    private bool _loading = true;
+    private bool _saving;
+    private bool _saved;
+    private string? _loadError;
+    private string? _saveError;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _loadError = null;
+        try
+        {
+            var me = await UserApi.GetProfileAsync();
+            _username = me.Username;
+            _model.DisplayName = me.DisplayName;
+        }
+        catch (ApiException ex)
+        {
+            _loadError = ex.Code switch
+            {
+                "UNAUTHORIZED" => "Bạn cần đăng nhập để xem hồ sơ.",
+                "USER_NOT_FOUND" => "Không tìm thấy tài khoản.",
+                "NETWORK_ERROR" => "Không kết nối được máy chủ.",
+                _ => "Không tải được hồ sơ, vui lòng thử lại."
+            };
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        _saving = true;
+        _saved = false;
+        _saveError = null;
+        try
+        {
+            var updated = await UserApi.UpdateProfileAsync(new UpdateProfileRequest { DisplayName = _model.DisplayName.Trim() });
+            _model.DisplayName = updated.DisplayName;
+            _saved = true;
+            await RefreshBarAsync();
+        }
+        catch (ApiException ex)
+        {
+            _saveError = ex.Code switch
+            {
+                "INVALID_DISPLAY_NAME" => "Tên hiển thị không hợp lệ (không để trống, tối đa 100 ký tự).",
+                "UNAUTHORIZED" => "Bạn cần đăng nhập.",
+                "INVALID_CSRF_TOKEN" => "Phiên làm việc hết hạn, vui lòng tải lại trang.",
+                "NETWORK_ERROR" => "Không kết nối được máy chủ.",
+                _ => "Không lưu được, vui lòng thử lại."
+            };
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    // Lưu xong thì lấy lại thông tin đăng nhập để tên trên thanh điều hướng đổi theo
+    private async Task RefreshBarAsync()
+    {
+        try
+        {
+            await Auth.InitializeAsync();
+        }
+        catch (ApiException)
+        {
+            // Không quan trọng: tên trên thanh sẽ cập nhật ở lần tải trang sau
+        }
+    }
+
+    private class ProfileInput
+    {
+        [Required(ErrorMessage = "Vui lòng nhập tên hiển thị.")]
+        [StringLength(100, ErrorMessage = "Tối đa 100 ký tự.")]
+        public string DisplayName { get; set; } = "";
+    }
+}

@@ -1,2 +1,26 @@
 @page "/register"
-@* TODO: Thành viên được phân công triển khai giao diện Register. *@
+@using global::Chat.Client.Components.Auth
+@inject NavigationManager Nav
+
+<div class="as-root auth-center">
+    <div class="page page-narrow">
+        <div class="brand">
+            <div class="brand-logo">C</div>
+            <div class="brand-name">chat_zalo</div>
+            <div class="brand-tagline">Tạo tài khoản để bắt đầu trò chuyện</div>
+        </div>
+
+        <div class="card">
+            <h1 class="page-title">Đăng ký</h1>
+
+            <RegisterForm OnSuccess="GoLogin" />
+
+            <p class="muted center">Đã có tài khoản? <a href="login">Đăng nhập</a></p>
+        </div>
+    </div>
+</div>
+
+@code {
+    // Đăng ký không tự đăng nhập nên chuyển sang trang Login
+    private void GoLogin() => Nav.NavigateTo("/login");
+}
