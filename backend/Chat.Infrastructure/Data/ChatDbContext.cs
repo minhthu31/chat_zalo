@@ -17,6 +17,8 @@ public class ChatDbContext : IdentityDbContext<ApplicationUser, IdentityRole<Gui
     public DbSet<Conversation> Conversations => Set<Conversation>();
     public DbSet<DirectConversation> DirectConversations => Set<DirectConversation>();
     public DbSet<ConversationMember> ConversationMembers => Set<ConversationMember>();
+    public DbSet<GroupConversation> GroupConversations => Set<GroupConversation>();
+    public DbSet<GroupAdminTransferRequest> GroupAdminTransferRequests => Set<GroupAdminTransferRequest>();
     public DbSet<Message> Messages => Set<Message>();
 
     protected override void OnModelCreating(ModelBuilder builder)

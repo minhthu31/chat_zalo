@@ -11,6 +11,7 @@ public class Conversation
 
     // Navigation properties
     public DirectConversation? DirectConversation { get; set; }
+    public GroupConversation? GroupConversation { get; set; }
     public ICollection<ConversationMember> Members { get; set; } = new List<ConversationMember>();
     public ICollection<Message> Messages { get; set; } = new List<Message>();
 }
