@@ -44,19 +44,19 @@
 
 ## 3. Mở rộng Sprint 2 – Chat nhóm
 
-### 3.1. Schema bổ sung CHAT-12
+### 3.1. Schema bổ sung đề xuất
 
 | Bảng/cột                               | Thiết kế                                                                                                        | Mục đích                                       |
 | -------------------------------------- | --------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
-| `Conversations.Kind` **(đã có)**       | `Direct` hoặc `Group`                                                                                           | Phân biệt hội thoại, giữ dữ liệu Direct        |
-| `GroupConversations` **(CHAT-12)**     | `ConversationId` PK/FK → Conversations; `Name` không trắng, tối đa 100 ký tự; `DeletedAt` nullable             | Thông tin nhóm, giải tán mềm                   |
-| `ConversationMembers.Role` **(đã có)** | `Admin` hoặc `Member` cho nhóm; Direct mặc định `Member`                                                        | Vai trò trong nhóm                             |
-| `ConversationMembers.LeftAt` **(đã có)** | `timestamptz` nullable                                                                                        | Thành viên đang hoạt động nếu `LeftAt IS NULL` |
-| `GroupAdminTransferRequests` **(CHAT-12)** | `Id` UUID PK; FK tới nhóm và hai thành viên; `Status`, `CreatedAt`, `ResolvedAt` nullable                    | Đề nghị và xác nhận chuyển Admin               |
+| `Conversations.Kind`                   | Thêm/cho phép `Group` bên cạnh `Direct`                                                                         | Phân biệt hội thoại, giữ dữ liệu Direct        |
+| `GroupConversations` **(mới)**         | `ConversationId` PK/FK → Conversations; `Name` NOT NULL; `DeletedAt` nullable                                   | Thông tin nhóm, giải tán mềm                   |
+| `ConversationMembers.Role` **(mới)**   | `Admin` hoặc `Member` cho nhóm; Direct có thể mặc định `Member`                                                 | Vai trò trong nhóm                             |
+| `ConversationMembers.LeftAt` **(mới)** | `timestamptz` nullable                                                                                          | Thành viên đang hoạt động nếu `LeftAt IS NULL` |
+| `GroupAdminTransferRequests` **(mới)** | `Id` UUID PK, `ConversationId` FK, `FromUserId` FK, `ToUserId` FK, `Status`, `CreatedAt`, `ResolvedAt` nullable | Đề nghị và xác nhận chuyển Admin               |
 
-- `GroupConversations` chỉ gắn với `Conversations.Kind = Group`; deferred trigger kiểm tra điều này. `DirectConversations` chỉ gắn với `Kind = Direct` theo service Sprint 1.
+- `GroupConversations` chỉ gắn với `Conversations.Kind = Group`; `DirectConversations` chỉ gắn với `Kind = Direct`. Điều kiện liên bảng phải xác minh trong transaction/service (CHECK thông thường không tham chiếu bảng khác).
 - Tên nhóm được kiểm tra không trống, độ dài giới hạn phải thống nhất API; không thêm bảng `Users` mới.
-- `GroupAdminTransferRequests.Status` dùng các giá trị `Pending`, `Accepted`, `Rejected`, `Cancelled`; CHECK yêu cầu `ResolvedAt` chỉ có khi đã xử lý. Partial unique index giới hạn một yêu cầu `Pending` trên mỗi nhóm.
+- `GroupAdminTransferRequests.Status` dùng các giá trị `Pending`, `Accepted`, `Rejected`, `Cancelled` và chỉ một yêu cầu Pending trên mỗi nhóm (partial unique index nếu thiết kế lưu yêu cầu trong DB).
 - `FromUserId`, `ToUserId` phải là hai thành viên khác nhau đang hoạt động trong nhóm; `FromUserId` là Admin hiện tại.
 - Không xóa hàng `ConversationMembers` khi rời nhóm nếu muốn lưu lịch sử thành viên; cập nhật `LeftAt`. Xóa/giải tán nhóm dùng đánh dấu ngừng hoạt động, không tự xóa vật lý tin nhắn.
 
@@ -64,8 +64,8 @@
 
 - Người tạo nhóm là `Admin` đầu tiên; còn lại `Member`.
 - Nhóm **đang hoạt động** phải có **đúng một Admin đang hoạt động**.
-- **Partial unique index** theo `ConversationId` trên `ConversationMembers` với điều kiện `Role = 'Admin' AND LeftAt IS NULL` ngăn hai Admin đang hoạt động.
-- Migration CHAT-12 thêm **deferred constraint trigger** kiểm tra mỗi nhóm chưa giải tán có một Admin khi transaction kết thúc. Tạo nhóm, chuyển quyền, rời nhóm và giải tán phải cập nhật các hàng liên quan trong cùng transaction; trigger từ chối commit nếu nhóm hoạt động còn 0 Admin. Backend vẫn phải kiểm tra quyền và dùng concurrency control để trả lỗi nghiệp vụ đúng hợp đồng.
+- Tạo **partial unique index** theo `ConversationId` trên `ConversationMembers` với điều kiện `Role = 'Admin' AND LeftAt IS NULL` để ngăn **hai Admin**. Index này chỉ bảo đảm **tối đa một**, không tự bảo đảm **ít nhất một**.
+- **Bắt buộc** kiểm tra nhóm luôn còn một Admin tại Backend, dùng transaction/concurrency control cho tạo nhóm, chuyển quyền, rời nhóm, xóa Admin hoặc giải tán; không để xuất hiện nhóm hoạt động có 0 Admin.
 - Chuyển Admin: Admin đề nghị → người nhận chấp nhận → trong một transaction hạ vai trò Admin cũ và nâng thành viên mới; từ chối không đổi vai trò. Lưu trạng thái xử lý để tránh accept lặp/race.
 - Admin chỉ được rời nhóm nếu đã chuyển quyền thành công; nếu là thành viên duy nhất, có thể giải tán nhóm.
 
@@ -97,7 +97,7 @@ Khi **A chặn B**:
 
 ## 4. Migration và nghiệm thu Sprint 2
 
-1. CHAT-12 đối chiếu code hiện có với API Contract Sprint 2 và chỉ thêm hai bảng mới ở mục 3.1; các cột `Kind`, `Role`, `LeftAt` đã tồn tại từ Sprint 1.
+1. Trước khi sửa schema, người phụ trách DB đối chiếu code hiện có, API Contract Sprint 2 và tên cột/table thực tế. Các tên mới ở mục 3.1 là thiết kế dự kiến; tránh tạo bảng/cột trùng.
 2. Chỉ người phụ trách Database thực hiện migration schema dùng chung; các thành viên khác trao đổi qua PR/Leader.
 3. Không sửa migration đã merge; tạo migration mới, có kiểm thử nâng cấp từ DB Sprint 1 **và** DB mới sạch.
 4. Kiểm thử PK/FK/UNIQUE/CHECK, partial unique index, race khi hai người cùng accept chuyển Admin, giữ dữ liệu Direct, lịch sử 1.000 tin và Blocks trước phân trang.

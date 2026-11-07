@@ -75,13 +75,11 @@ erDiagram
       timestamptz CreatedAt
     }
 
-%% Sprint 1 tables retained. CHAT-12 adds GroupConversations and GroupAdminTransferRequests.
-%% Role / LeftAt on ConversationMembers already existed in Sprint 1.
+%% Sprint 1 tables retained. Sprint 2 proposes GroupConversations, GroupAdminTransferRequests,
+%% and Role / LeftAt on ConversationMembers. Confirm against actual ChatDbContext before migration.
 %% UNIQUE(ConversationId, Seq) and UNIQUE(ConversationId, SenderUserId, ClientMessageId) on Messages.
 %% UNIQUE(UserLowId, UserHighId) on DirectConversations.
 %% Group: partial UNIQUE ConversationMembers(ConversationId) WHERE Role='Admin' AND LeftAt IS NULL.
-%% A deferred constraint trigger also rejects a commit leaving an active group without one Admin.
-%% Creation and transfer must update all affected rows in a single transaction.
-%% GroupAdminTransferRequests has a partial UNIQUE index on ConversationId WHERE Status='Pending'.
+%% This enforces at MOST one Admin; service transactions enforce AT LEAST one for active groups.
 %% Other FK/CHECK/uniqueness rules documented in DATABASE_RULES.md.
 %% Other Identity tables: Roles, UserRoles, UserClaims, RoleClaims, UserLogins, UserTokens.
