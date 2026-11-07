@@ -29,5 +29,7 @@ builder.Services.AddScoped<IAuthApiClient, AuthApiClient>();
 builder.Services.AddScoped<IUserApiClient, UserApiClient>();
 builder.Services.AddScoped<IFriendshipApiClient, FriendshipApiClient>();
 builder.Services.AddScoped<AuthState>();
+builder.Services.AddScoped<ChatApiClient>();
+builder.Services.AddTransient<ChatRealtimeClient>();
 
 await builder.Build().RunAsync();

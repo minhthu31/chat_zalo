@@ -1,0 +1,18 @@
+@namespace Chat.Client.Components.Messaging
+<form class="composer" @onsubmit="() => OnSend.InvokeAsync()" @onsubmit:preventDefault>
+    <label for="chat-body">Tin nhắn</label>
+    <textarea id="chat-body" value="@Body" @oninput="UpdateBody" maxlength="4000" rows="3"
+              disabled="@(Disabled || Retry)" placeholder="Nhập tin nhắn…"></textarea>
+    <div><small>@Body.Length / 4.000</small>
+        <button class="btn btn-primary" type="submit" disabled="@(Disabled || string.IsNullOrWhiteSpace(Body))">@(Retry ? "Thử gửi lại" : "Gửi tin nhắn")</button>
+    </div>
+    @if (Retry) { <small>Nội dung được giữ nguyên để thử lại an toàn sau lỗi mạng.</small> }
+</form>
+@code {
+    [Parameter] public string Body { get; set; } = "";
+    [Parameter] public EventCallback<string> BodyChanged { get; set; }
+    [Parameter] public bool Disabled { get; set; }
+    [Parameter] public bool Retry { get; set; }
+    [Parameter] public EventCallback OnSend { get; set; }
+    private Task UpdateBody(ChangeEventArgs e) => BodyChanged.InvokeAsync(e.Value?.ToString() ?? "");
+}
