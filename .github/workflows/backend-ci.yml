@@ -25,3 +25,5 @@ jobs:
 
       - name: Build Backend
         run: dotnet build backend/Chat.sln --no-restore --configuration Release
+      - name: Test Backend
+        run: dotnet test backend/Chat.sln --no-restore --configuration Release
