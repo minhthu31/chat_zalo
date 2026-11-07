@@ -521,4 +521,54 @@ SignalR chỉ thông báo realtime, không thay thế Database.
 4. User thứ ba bị `403` khi đọc chat; chặn hai chiều ngăn gửi mới.
 5. Cả nhóm chạy chung database `chat_zalo`, migration từ DB mới sạch thành công; browser Blazor không chứa DB credentials.
 
-**Nguồn sự thật:** `docs/API_CONTRACT.md` là HTTP/DTO/Hub contract; `database/DATABASE_RULES.md` là schema/invariants; `database/ERD.mmd` là sơ đồ suy ra từ database rules; `docs/FRONTEND_BLAZOR_GUIDE.md` là quy tắc FE; `docs/GIT_RULES.md` là quy trình thay đổi. Khi mâu thuẫn, mở issue và Leader duyệt, không tự chọn theo sở thích.
+## 9. Sprint 2 – API mới
+
+**Kiểu dùng chung:** `Guid` là chuỗi UUID; `GroupDto={id,kind:"Group",name,lastMessageSeq}`; `GroupMemberDto={userId,username,displayName,role}` (`Admin`/`Member`). Các API `/conversations/{id}` dành cho nhóm phải kiểm tra `kind=Group`, nếu sai trả `400 INVALID_CONVERSATION_KIND`.
+
+| Method | Endpoint | Request → Response thành công |
+|---|---|---|
+| POST | `/api/auth/change-password` | `{currentPassword,newPassword}` → `204` |
+| GET | `/api/users/search/paged?username=an&page=1&pageSize=10` | `200 PagedUsersResponse` |
+| POST | `/api/conversations/groups` | `{name,memberIds:Guid[]}` → `201 GroupDto` |
+| GET | `/api/conversations/{id}/members` | `200 GroupMemberDto[]` |
+| POST | `/api/conversations/{id}/members` | `{userId}` → `201 GroupMemberDto` |
+| DELETE | `/api/conversations/{id}/members/{userId}` | Admin xóa thành viên khác → `204` |
+| POST | `/api/conversations/{id}/leave` | Người gọi tự rời → `204` |
+| POST | `/api/conversations/{id}/admin-transfer` | `{targetUserId}` → `202 AdminTransferDto` |
+| POST | `/api/conversations/{id}/admin-transfer/{requestId}/accept` | Người được chọn đồng ý → `204` |
+| POST | `/api/conversations/{id}/admin-transfer/{requestId}/reject` | Người được chọn từ chối → `204` |
+| DELETE | `/api/conversations/{id}` | Admin giải tán nhóm → `204` |
+
+**DTO bổ sung:**
+
+```json
+PagedUsersResponse: {"items":[{"id":"Guid","username":"string","displayName":"string"}],"page":1,"pageSize":10,"totalCount":25,"totalPages":3}
+GroupDto: {"id":"Guid","kind":"Group","name":"Nhom hoc","lastMessageSeq":0}
+GroupMemberDto: {"userId":"Guid","username":"string","displayName":"string","role":"Member"}
+AdminTransferDto: {"id":"Guid","conversationId":"Guid","fromUserId":"Guid","toUserId":"Guid","status":"Pending","createdAt":"2026-11-07T10:00:00Z"}
+```
+
+**Validation / lỗi cố định:**
+
+- Users: `page>=1`, `pageSize` mặc định 10, tối đa 100; sắp xếp ổn định. API `/users/search` cũ vẫn trả **mảng**, không đổi kiểu response.
+- Password: kiểm tra mật khẩu hiện tại; sai → `400 INVALID_CURRENT_PASSWORD`; đổi thành công vô hiệu hóa cookie/phiên cũ, kể cả phiên hiện tại, yêu cầu login lại. Thiếu/sai CSRF → `400 INVALID_CSRF_TOKEN`.
+- Nhóm: tên không rỗng (độ dài tối đa **100 ký tự**); `memberIds` không chứa ID trùng, tối thiểu 1 bạn bè Accepted của người tạo ngoài chính mình; người tạo tự động được thêm làm Admin. Lỗi thiếu quyền → `403 GROUP_ACCESS_DENIED`, chưa kết bạn → `403 NOT_FRIEND`, thêm trùng → `409 ALREADY_GROUP_MEMBER`, không tìm thấy → `404 NOT_FOUND`.
+- Chuyển Admin: chỉ Admin hiện tại gửi yêu cầu tới **Member đang hoạt động**; mỗi nhóm tối đa một yêu cầu `Pending` tại một thời điểm (`409 ADMIN_TRANSFER_PENDING`). Chỉ người nhận có quyền accept/reject. Không được chấp nhận lặp (`409 ADMIN_TRANSFER_ALREADY_RESOLVED`). Chấp nhận thành công mới đổi vai trò **trong cùng transaction** (Admin cũ → Member; Member mới → Admin). Từ chối không đổi vai trò. Admin muốn rời phải chuyển quyền trước; nếu nhóm chỉ còn Admin thì giải tán nhóm.
+- Giải tán nhóm: đánh dấu ngừng hoạt động, từ chối gửi tin/Join sau đó; không xóa vật lý Messages. Member được tự rời; chỉ Admin được xóa thành viên khác hoặc giải tán nhóm.
+
+## 10. Blocks, Messages, SignalR trong Group
+
+- Thành viên được mời **bạn bè Accepted của chính mình**; các thành viên nhóm không cần kết bạn với nhau. Group hoạt động có **đúng một Admin**. Người rời/bị xóa không được đọc/gửi/Join nhóm.
+- **A chặn B:** B không được xem tin cũ và mới **do A gửi** trong nhóm; vẫn xem tin của C, gửi tin và giữ tư cách thành viên. Bỏ chặn → tin A hiện lại. Backend lọc **trước LIMIT** để lấy đủ tối đa 10 tin được xem; Seq có thể nhảy. Không lộ `body`/preview của tin bị ẩn. **Quy tắc Direct không đổi.**
+- Group dùng **cùng API Messages**, cùng `MessageResponse`, Seq, retry; FE yêu cầu `limit=10`, Backend vẫn mặc định `20`.
+- SignalR Hub `/hubs/chat`: event `ConversationChanged` payload `{eventId,conversationId,latestSeq}`. Chỉ **connection đã Join** và còn quyền mới nhận event. Không phát trước khi DB commit. FE nhận event thì GET Messages bằng `afterSeq`; khi reconnect phải Join lại và đồng bộ. SignalR không phát nội dung tin nhắn.
+
+## 11. Quy tắc tích hợp
+
+1. FE dùng đúng endpoint, request, response và HTTP status trong hợp đồng; không tạo API riêng. Backend chuẩn hóa lỗi thành `{code,message}`; mọi thao tác ghi có CSRF.
+2. DB giữ schema Sprint 1; chỉ mở rộng nhóm qua EF Migration, kiểm tra `database/DATABASE_RULES.md` và `database/ERD.mmd`. Không tạo User Entity thứ hai.
+3. Mỗi người dùng branch riêng, tạo PR vào **`main`**; Leader duyệt. CI Backend + Frontend do Leader phụ trách.
+4. Kiểm thử tối thiểu: đăng nhập 2 tài khoản, đổi mật khẩu, tìm kiếm phân trang, mời bạn bè, chuyển Admin, Blocks Group, 1.000 tin/10 tin mỗi lần tải, retry, realtime/reconnect, PostgreSQL 18.
+5. Chưa thuộc Sprint 2: file/ảnh và 2FA.
+
+**Tài liệu này là hợp đồng thiết kế Sprint 2; không có nghĩa code mới đã triển khai. Mọi thay đổi endpoint, DTO và quy tắc phải được Leader duyệt trước khi code.**
