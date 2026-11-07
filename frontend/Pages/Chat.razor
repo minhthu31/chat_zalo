@@ -73,6 +73,10 @@
     private ChatSession? session;
     private ChatHubClient? hub;
     private ConversationsApiClient? conversationsApi;
+    private ConversationDiscovery? discovery;
+    private readonly CancellationTokenSource discoveryLifetime = new();
+    private Task? discoveryLoop;
+    private int conversationRevision;
     private List<ConversationDto> conversations = [];
     private List<FriendshipDto> friends = [];
     private Guid targetFriend;
@@ -91,16 +95,25 @@
         hub.Reconnected += OnReconnected;
         hub.StatusChanged += OnConnectionChanged;
         hub.SubscriptionFailed += OnSubscriptionFailed;
+        discovery = new ConversationDiscovery(conversationsApi, hub.JoinAsync);
+        discovery.SubscriptionFailed += OnSubscriptionFailed;
         try { if (!Auth.IsInitialized) await Auth.InitializeAsync(); }
         catch (Exception ex) { error = Describe(ex); }
         initializing = false;
-        if (Auth.IsAuthenticated) await RefreshAsync();
+        if (Auth.IsAuthenticated)
+        {
+            await RefreshAsync();
+            if (!disposed && !discoveryLifetime.IsCancellationRequested)
+                discoveryLoop = DiscoverConversationsAsync(discoveryLifetime.Token);
+        }
     }
 
     private void OnAuthChanged()
     {
         if (!Auth.IsAuthenticated) _ = InvokeAsync(async () =>
         {
+            if (disposed) return;
+            discoveryLifetime.Cancel();
             session?.Reset();
             conversations.Clear();
             friends.Clear();
@@ -148,15 +161,62 @@
         if (!disposed) StateHasChanged();
     });
 
+    private async Task DiscoverConversationsAsync(CancellationToken ct)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
+        try
+        {
+            while (await timer.WaitForNextTickAsync(ct))
+            {
+                await InvokeAsync(async () =>
+                {
+                    if (disposed || !Auth.IsAuthenticated || refreshing || creating || discovery is null || session is null) return;
+                    var revision = conversationRevision;
+                    try
+                    {
+                        var items = await discovery.RefreshAsync(ct);
+                        if (disposed || ct.IsCancellationRequested || !Auth.IsAuthenticated || revision != conversationRevision) return;
+                        conversations = items;
+                        if (session.State.SelectedId is Guid selected && !items.Any(c => c.Id == selected))
+                            session.State.SelectedId = null;
+                        if (session.State.SelectedId is Guid id)
+                        {
+                            // Catch messages sent before JoinConversation completed, or while the hub was offline.
+                            if (items.Any(c => c.Id == id && c.LastMessageSeq > session.State.For(id).SyncedSeq))
+                                await RunAsync(id, () => session.SyncAsync(id)).WaitAsync(ct);
+                        }
+                        else if (items.Count > 0) await SelectAsync(items[0].Id).WaitAsync(ct);
+                    }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested) { return; }
+                    catch (Exception ex)
+                    {
+                        if (disposed || ct.IsCancellationRequested) return;
+                        if (ex is ApiException { StatusCode: 401 })
+                        {
+                            discoveryLifetime.Cancel();
+                            session.Reset();
+                            conversations.Clear();
+                            friends.Clear();
+                        }
+                        error = Describe(ex);
+                    }
+                    if (!disposed) StateHasChanged();
+                });
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
+    }
+
     private async Task RefreshAsync()
     {
-        if (refreshing || disposed || session is null || conversationsApi is null || !Auth.IsAuthenticated) return;
+        if (refreshing || disposed || session is null || discovery is null || !Auth.IsAuthenticated) return;
         var owner = session;
         refreshing = true;
         error = null;
         try
         {
-            var items = await conversationsApi.GetAsync();
+            conversationRevision++;
+            var items = await discovery.RefreshAsync(discoveryLifetime.Token);
             if (disposed || !Auth.IsAuthenticated) return;
             conversations = items.Where(c => c.Kind == "Direct").ToList();
             try { friends = await FriendshipApi.GetFriendsAsync(); }
@@ -169,7 +229,6 @@
                 try
                 {
                     await hub.StartAsync();
-                    foreach (var item in conversations) await hub.JoinAsync(item.Id);
                 }
                 catch (Exception ex) { error = "Realtime chưa sẵn sàng: " + Describe(ex); }
             }
@@ -177,12 +236,14 @@
             if (owner.State.SelectedId is Guid id) await RunAsync(id, () => owner.SyncAsync(id));
             else if (conversations.Count > 0) await SelectAsync(conversations[0].Id);
         }
+        catch (OperationCanceledException) when (discoveryLifetime.IsCancellationRequested) { }
         catch (Exception ex)
         {
             if (!disposed)
             {
                 if (ex is ApiException { StatusCode: 401 })
                 {
+                    discoveryLifetime.Cancel();
                     owner.Reset();
                     conversations.Clear();
                     friends.Clear();
@@ -195,13 +256,15 @@
 
     private async Task CreateAsync()
     {
-        if (creating || targetFriend == Guid.Empty || conversationsApi is null || session is null) return;
+        if (creating || refreshing || targetFriend == Guid.Empty || conversationsApi is null || session is null) return;
         creating = true;
+        conversationRevision++;
         error = null;
         try
         {
             var conversation = await conversationsApi.CreateDirectAsync(targetFriend);
             if (disposed || !Auth.IsAuthenticated) return;
+            conversationRevision++;
             if (!conversations.Any(c => c.Id == conversation.Id)) conversations.Add(conversation);
             if (hub is not null)
                 try { await hub.JoinAsync(conversation.Id); }
@@ -259,8 +322,11 @@
     public async ValueTask DisposeAsync()
     {
         disposed = true;
+        discoveryLifetime.Cancel();
         session?.Reset();
         Auth.OnChange -= OnAuthChanged;
+        if (discoveryLoop is not null) await discoveryLoop;
         if (hub is not null) await hub.DisposeAsync();
+        discoveryLifetime.Dispose();
     }
 }

@@ -20,5 +20,6 @@
     <Compile Include="../../../frontend/Services/ApiException.cs" Link="Services/ApiException.cs" />
     <Compile Include="../../../frontend/Services/MessagesApiClient.cs" Link="Services/MessagesApiClient.cs" />
     <Compile Include="../../../frontend/Services/ConversationsApiClient.cs" Link="Services/ConversationsApiClient.cs" />
+    <Compile Include="../../../frontend/Services/ConversationDiscovery.cs" Link="Services/ConversationDiscovery.cs" />
   </ItemGroup>
 </Project>
