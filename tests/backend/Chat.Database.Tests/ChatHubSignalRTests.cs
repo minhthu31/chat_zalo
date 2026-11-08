@@ -101,10 +101,16 @@ public sealed class ChatHubSignalRTests
                 CreatedByUserId = ownerId,
                 Kind = "Group"
             });
+            _db.GroupConversations.Add(new Chat.Domain.Entities.GroupConversation
+            {
+                ConversationId = id,
+                Name = "SignalR test group"
+            });
             _db.ConversationMembers.AddRange(members.Select(member => new Chat.Domain.Entities.ConversationMember
             {
                 ConversationId = id,
                 UserId = member.UserId,
+                Role = member.UserId == ownerId ? "Admin" : "Member",
                 LeftAt = member.LeftAt
             }));
             await _db.SaveChangesAsync();
@@ -318,8 +324,12 @@ public sealed class ChatHubSignalRTests
     public async Task RevokedMembership_StopsNotificationsAndPreventsRejoining()
     {
         await using var database = await TestDatabase.CreateAsync();
+        var ownerId = await database.AddUserAsync();
         var userId = await database.AddUserAsync();
-        var conversationId = await database.AddGroupConversationAsync(userId, (userId, null));
+        var conversationId = await database.AddGroupConversationAsync(
+            ownerId,
+            (ownerId, null),
+            (userId, null));
 
         using var factory = CreateFactory();
         await using var connection = CreateConnection(factory, userId);
