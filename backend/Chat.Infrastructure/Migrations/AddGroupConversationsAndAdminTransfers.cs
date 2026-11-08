@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -99,68 +99,117 @@ namespace Chat.Infrastructure.Migrations
                 column: "DeletedAt");
 
             // A partial unique index prevents two active admins. The deferred check also
-            // prevents an active group from committing without an admin, while allowing
-            // group creation and admin transfer to use multiple statements in one transaction.
+            // prevents an active group from committing without an admin or without metadata,
+            // checks both source and target groups when memberships change,
+            // while allowing group creation and admin transfer to use multiple statements in one transaction.
             migrationBuilder.Sql("""
-                CREATE FUNCTION check_group_has_one_admin() RETURNS trigger AS $BODY$
+                CREATE OR REPLACE FUNCTION check_group_has_one_admin() RETURNS trigger AS $BODY$
                 DECLARE
-                    group_id uuid;
+                    group_ids uuid[] := '{}';
+                    gid uuid;
                     group_kind text;
                     deleted_at timestamptz;
                     active_admin_count integer;
+                    has_metadata boolean;
                 BEGIN
-                    IF TG_OP = 'DELETE' THEN
-                        group_id := OLD."ConversationId";
-                    ELSIF TG_TABLE_NAME = 'Conversations' THEN
-                        group_id := NEW."Id";
-                    ELSE
-                        group_id := NEW."ConversationId";
+                    IF TG_TABLE_NAME = 'Conversations' THEN
+                        IF TG_OP = 'DELETE' THEN
+                            group_ids := ARRAY[OLD."Id"];
+                        ELSIF TG_OP = 'UPDATE' THEN
+                            IF OLD."Id" <> NEW."Id" THEN
+                                group_ids := ARRAY[OLD."Id", NEW."Id"];
+                            ELSE
+                                group_ids := ARRAY[NEW."Id"];
+                            END IF;
+                        ELSE
+                            group_ids := ARRAY[NEW."Id"];
+                        END IF;
+                    ELSIF TG_TABLE_NAME = 'GroupConversations' THEN
+                        IF TG_OP = 'DELETE' THEN
+                            group_ids := ARRAY[OLD."ConversationId"];
+                        ELSIF TG_OP = 'UPDATE' THEN
+                            IF OLD."ConversationId" <> NEW."ConversationId" THEN
+                                group_ids := ARRAY[OLD."ConversationId", NEW."ConversationId"];
+                            ELSE
+                                group_ids := ARRAY[NEW."ConversationId"];
+                            END IF;
+                        ELSE
+                            group_ids := ARRAY[NEW."ConversationId"];
+                        END IF;
+                    ELSIF TG_TABLE_NAME = 'ConversationMembers' THEN
+                        IF TG_OP = 'DELETE' THEN
+                            group_ids := ARRAY[OLD."ConversationId"];
+                        ELSIF TG_OP = 'UPDATE' THEN
+                            IF OLD."ConversationId" <> NEW."ConversationId" THEN
+                                group_ids := ARRAY[OLD."ConversationId", NEW."ConversationId"];
+                            ELSE
+                                group_ids := ARRAY[NEW."ConversationId"];
+                            END IF;
+                        ELSE
+                            group_ids := ARRAY[NEW."ConversationId"];
+                        END IF;
                     END IF;
 
-                    SELECT c."Kind", g."DeletedAt" INTO group_kind, deleted_at
-                    FROM "GroupConversations" g
-                    JOIN "Conversations" c ON c."Id" = g."ConversationId"
-                    WHERE g."ConversationId" = group_id
-                    FOR UPDATE OF g;
+                    FOREACH gid IN ARRAY group_ids LOOP
+                        SELECT c."Kind" INTO group_kind
+                        FROM "Conversations" c
+                        WHERE c."Id" = gid;
 
-                    IF NOT FOUND THEN
-                        RETURN NULL;
-                    END IF;
+                        IF NOT FOUND THEN
+                            CONTINUE;
+                        END IF;
 
-                    IF group_kind <> 'Group' THEN
-                        RAISE EXCEPTION 'GroupConversations requires Kind=Group'
-                            USING ERRCODE = '23514', CONSTRAINT = 'CK_GroupConversations_Kind';
-                    END IF;
+                        SELECT g."DeletedAt" INTO deleted_at
+                        FROM "GroupConversations" g
+                        WHERE g."ConversationId" = gid
+                        FOR UPDATE OF g;
 
-                    IF EXISTS (
-                        SELECT 1 FROM "ConversationMembers"
-                        WHERE "ConversationId" = group_id
-                          AND "Role" NOT IN ('Admin', 'Member')
-                    ) THEN
-                        RAISE EXCEPTION 'Group members must have Admin or Member role'
-                            USING ERRCODE = '23514', CONSTRAINT = 'CK_GroupConversationMembers_Role';
-                    END IF;
+                        has_metadata := FOUND;
 
-                    IF deleted_at IS NOT NULL THEN
-                        RETURN NULL;
-                    END IF;
+                        IF group_kind <> 'Group' THEN
+                            IF has_metadata THEN
+                                RAISE EXCEPTION 'GroupConversations requires Kind=Group'
+                                    USING ERRCODE = '23514', CONSTRAINT = 'CK_GroupConversations_Kind';
+                            END IF;
+                            CONTINUE;
+                        END IF;
 
-                    SELECT count(*) INTO active_admin_count
-                    FROM "ConversationMembers"
-                    WHERE "ConversationId" = group_id
-                      AND "Role" = 'Admin'
-                      AND "LeftAt" IS NULL;
+                        IF NOT has_metadata THEN
+                            RAISE EXCEPTION 'Active group must have metadata and exactly one active admin'
+                                USING ERRCODE = '23514', CONSTRAINT = 'CK_GroupConversations_OneActiveAdmin';
+                        END IF;
 
-                    IF active_admin_count <> 1 THEN
-                        RAISE EXCEPTION 'Active group must have exactly one active admin'
-                            USING ERRCODE = '23514', CONSTRAINT = 'CK_GroupConversations_OneActiveAdmin';
-                    END IF;
+                        IF EXISTS (
+                            SELECT 1 FROM "ConversationMembers"
+                            WHERE "ConversationId" = gid
+                              AND "Role" NOT IN ('Admin', 'Member')
+                        ) THEN
+                            RAISE EXCEPTION 'Group members must have Admin or Member role'
+                                USING ERRCODE = '23514', CONSTRAINT = 'CK_GroupConversationMembers_Role';
+                        END IF;
+
+                        IF deleted_at IS NOT NULL THEN
+                            CONTINUE;
+                        END IF;
+
+                        SELECT count(*) INTO active_admin_count
+                        FROM "ConversationMembers"
+                        WHERE "ConversationId" = gid
+                          AND "Role" = 'Admin'
+                          AND "LeftAt" IS NULL;
+
+                        IF active_admin_count <> 1 THEN
+                            RAISE EXCEPTION 'Active group must have exactly one active admin'
+                                USING ERRCODE = '23514', CONSTRAINT = 'CK_GroupConversations_OneActiveAdmin';
+                        END IF;
+                    END LOOP;
+
                     RETURN NULL;
                 END;
                 $BODY$ LANGUAGE plpgsql;
 
                 CREATE CONSTRAINT TRIGGER "TR_GroupConversations_OneActiveAdmin"
-                AFTER INSERT OR UPDATE ON "GroupConversations"
+                AFTER INSERT OR UPDATE OR DELETE ON "GroupConversations"
                 DEFERRABLE INITIALLY DEFERRED
                 FOR EACH ROW EXECUTE FUNCTION check_group_has_one_admin();
 
@@ -170,7 +219,7 @@ namespace Chat.Infrastructure.Migrations
                 FOR EACH ROW EXECUTE FUNCTION check_group_has_one_admin();
 
                 CREATE CONSTRAINT TRIGGER "TR_Conversations_GroupKind"
-                AFTER UPDATE OF "Kind" ON "Conversations"
+                AFTER INSERT OR UPDATE ON "Conversations"
                 DEFERRABLE INITIALLY DEFERRED
                 FOR EACH ROW EXECUTE FUNCTION check_group_has_one_admin();
                 """);

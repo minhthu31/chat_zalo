@@ -312,4 +312,71 @@ public class GroupSchemaPostgresTests
         Assert.Equal("CK_GroupAdminTransferRequests_Resolution", error.ConstraintName);
         await transaction.RollbackAsync();
     }
+
+    [Fact]
+    public async Task GroupWithoutMetadataAndAdmin_IsRejectedAtTransactionBoundary()
+    {
+        await using var connection = await OpenAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        var user = Guid.NewGuid();
+        var group = Guid.NewGuid();
+        await SeedUserAsync(connection, transaction, user);
+        await ExecuteAsync(connection, transaction, $"""
+            INSERT INTO "Conversations" ("Id", "CreatedByUserId", "Kind", "CreatedAt", "LastActivityAt")
+            VALUES ('{group}', '{user}', 'Group', now(), now());
+            """);
+        await AddMemberAsync(connection, transaction, group, user, "Member");
+        var error = await Assert.ThrowsAsync<PostgresException>(() =>
+            ExecuteAsync(connection, transaction, "SET CONSTRAINTS ALL IMMEDIATE"));
+        Assert.Equal("CK_GroupConversations_OneActiveAdmin", error.ConstraintName);
+        await transaction.RollbackAsync();
+    }
+
+    [Fact]
+    public async Task GroupWithoutMetadata_IsRejectedAtTransactionBoundary()
+    {
+        await using var connection = await OpenAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        var user = Guid.NewGuid();
+        var group = Guid.NewGuid();
+        await SeedUserAsync(connection, transaction, user);
+        await ExecuteAsync(connection, transaction, $"""
+            INSERT INTO "Conversations" ("Id", "CreatedByUserId", "Kind", "CreatedAt", "LastActivityAt")
+            VALUES ('{group}', '{user}', 'Group', now(), now());
+            """);
+        var error = await Assert.ThrowsAsync<PostgresException>(() =>
+            ExecuteAsync(connection, transaction, "SET CONSTRAINTS ALL IMMEDIATE"));
+        Assert.Equal("CK_GroupConversations_OneActiveAdmin", error.ConstraintName);
+        await transaction.RollbackAsync();
+    }
+
+    [Fact]
+    public async Task MovingAdminMembershipToDisbandedGroup_LeavesSourceGroupWithoutAdmin_IsRejected()
+    {
+        await using var connection = await OpenAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        var admin = Guid.NewGuid();
+        var sourceGroup = Guid.NewGuid();
+        var disbandedGroup = Guid.NewGuid();
+        await SeedUserAsync(connection, transaction, admin);
+        await SeedGroupAsync(connection, transaction, sourceGroup, admin);
+        await AddMemberAsync(connection, transaction, sourceGroup, admin, "Admin");
+        await ExecuteAsync(connection, transaction, $"""
+            INSERT INTO "Conversations" ("Id", "CreatedByUserId", "Kind", "CreatedAt", "LastActivityAt")
+            VALUES ('{disbandedGroup}', '{admin}', 'Group', now(), now());
+            INSERT INTO "GroupConversations" ("ConversationId", "Name", "DeletedAt")
+            VALUES ('{disbandedGroup}', 'Disbanded group', now());
+            """);
+        await ExecuteAsync(connection, transaction, "SET CONSTRAINTS ALL IMMEDIATE");
+        await ExecuteAsync(connection, transaction, "SET CONSTRAINTS ALL DEFERRED");
+        await ExecuteAsync(connection, transaction, $"""
+            UPDATE "ConversationMembers"
+            SET "ConversationId" = '{disbandedGroup}'
+            WHERE "ConversationId" = '{sourceGroup}' AND "UserId" = '{admin}';
+            """);
+        var error = await Assert.ThrowsAsync<PostgresException>(() =>
+            ExecuteAsync(connection, transaction, "SET CONSTRAINTS ALL IMMEDIATE"));
+        Assert.Equal("CK_GroupConversations_OneActiveAdmin", error.ConstraintName);
+        await transaction.RollbackAsync();
+    }
 }
