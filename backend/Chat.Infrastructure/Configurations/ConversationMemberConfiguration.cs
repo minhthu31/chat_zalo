@@ -45,5 +45,10 @@ public class ConversationMemberConfiguration : IEntityTypeConfiguration<Conversa
             .OnDelete(DeleteBehavior.Restrict);
 
         builder.HasIndex(m => m.UserId);
+
+        builder.HasIndex(m => m.ConversationId)
+            .IsUnique()
+            .HasDatabaseName("IX_ConversationMembers_OneActiveAdmin")
+            .HasFilter("\"Role\" = 'Admin' AND \"LeftAt\" IS NULL");
     }
 }
