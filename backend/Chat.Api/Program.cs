@@ -35,6 +35,12 @@ builder.Services.AddIdentityCore<ApplicationUser>(options =>
 .AddDefaultTokenProviders()
 .AddSignInManager();
 
+builder.Services.Configure<SecurityStampValidatorOptions>(options =>
+{
+    // Immediate revocation is required by CHAT-13 after a password change.
+    options.ValidationInterval = TimeSpan.Zero;
+});
+
 var cookieName = configuration["Authentication:CookieName"] ?? "Chat.Auth";
 var antiforgeryCookieName = configuration["Authentication:AntiforgeryCookieName"]
     ?? "Chat.Antiforgery";
@@ -65,6 +71,11 @@ builder.Services
         options.ExpireTimeSpan = TimeSpan.FromHours(cookieExpirationHours);
         options.SlidingExpiration = true;
 
+        // Revalidate the Identity security stamp on every authenticated request.
+        // This makes cookies issued before a password change invalid immediately.
+        options.Events.OnValidatePrincipal =
+            SecurityStampValidator.ValidatePrincipalAsync;
+
         // API clients receive JSON/status codes instead of browser login redirects.
         options.Events.OnRedirectToLogin = context =>
         {
@@ -87,6 +98,15 @@ builder.Services
                 Message = "Bạn không có quyền thực hiện thao tác này."
             });
         };
+    })
+    // Identity's security-stamp rejection signs out the remember-me 2FA cookie too.
+    // AddIdentityCore does not register Identity cookie handlers automatically.
+    .AddCookie(IdentityConstants.TwoFactorRememberMeScheme, options =>
+    {
+        options.Cookie.Name = $"{cookieName}.TwoFactorRememberMe";
+        options.Cookie.HttpOnly = true;
+        options.Cookie.SameSite = sameSite;
+        options.Cookie.SecurePolicy = securePolicy;
     });
 
 builder.Services.AddAuthorization();
@@ -149,7 +169,7 @@ builder.Services.Configure<Microsoft.AspNetCore.Mvc.ApiBehaviorOptions>(options 
         {
             Code = "VALIDATION_ERROR",
             Message = message
-    
+
         });
     };
 });
