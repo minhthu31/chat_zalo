@@ -1,3 +1,4 @@
+using Chat.Infrastructure.Services;
 using Chat.Application.DTOs.Messages;
 using Chat.Application.Interfaces;
 using Chat.Application.Services;
@@ -68,12 +69,13 @@ public sealed class MessageServiceTests
     }
 
     private static MessageService CreateService(
-        ChatDbContext db,
-        IConversationEventPublisher? publisher = null) =>
-        new(
-            db,
-            publisher ?? NullPublisher.Instance,
-            NullLogger<MessageService>.Instance);
+    ChatDbContext db,
+    IConversationEventPublisher? publisher = null) =>
+    new(
+        db,
+        new BlockService(db),
+        publisher ?? NullPublisher.Instance,
+        NullLogger<MessageService>.Instance);
 
     private static ChatDbContext CreateContext(
         SaveChangesInterceptor? interceptor = null)
@@ -696,8 +698,168 @@ public sealed class MessageServiceTests
                 .SingleAsync());
     }
 
-    private sealed class FailMessageSaveInterceptor
-        : SaveChangesInterceptor
+
+  private static async Task<(Guid A, Guid B, Guid C, Guid ConversationId)>
+    SeedGroupAsync()
+    {
+        await using var db = CreateContext();
+
+        var a = Guid.NewGuid();
+        var b = Guid.NewGuid();
+        var c = Guid.NewGuid();
+        var conversationId = Guid.NewGuid();
+
+        foreach (var id in new[] { a, b, c })
+        {
+            var name = $"group_msg_{id:N}";
+
+            db.Users.Add(new ApplicationUser
+            {
+                Id = id,
+                UserName = name,
+                NormalizedUserName = name.ToUpperInvariant(),
+                Email = $"{name}@example.test",
+                NormalizedEmail = $"{name}@example.test".ToUpperInvariant(),
+                DisplayName = name,
+                SecurityStamp = Guid.NewGuid().ToString()
+            });
+        }
+
+        var conversation = new Conversation
+        {
+            Id = conversationId,
+            CreatedByUserId = a,
+            Kind = "Group"
+        };
+
+        db.Conversations.Add(conversation);
+
+        db.GroupConversations.Add(new GroupConversation
+        {
+            ConversationId = conversationId,
+            Name = "CHAT-16 test group"
+        });
+
+        db.ConversationMembers.AddRange(
+            new ConversationMember
+            {
+                ConversationId = conversationId,
+                UserId = a,
+                Role = "Admin"
+            },
+            new ConversationMember
+            {
+                ConversationId = conversationId,
+                UserId = b,
+                Role = "Member"
+            },
+            new ConversationMember
+            {
+                ConversationId = conversationId,
+                UserId = c,
+                Role = "Member"
+            });
+
+        await db.SaveChangesAsync();
+
+        return (a, b, c, conversationId);
+    }
+
+    [Fact]
+    public async Task GroupBlock_HidesMessages_AllowsSending_PreservesMembership_AndUnblockRestoresHistory()
+    {
+        var (a, b, c, conversationId) = await SeedGroupAsync();
+
+        await SendAsync(a, conversationId, Guid.NewGuid(), "A old message");
+        await SendAsync(c, conversationId, Guid.NewGuid(), "C message");
+
+        await using (var db = CreateContext())
+        {
+            await new BlockService(db).BlockAsync(a, b);
+        }
+
+        await using (var db = CreateContext())
+        {
+            var history = await CreateService(db).GetHistoryAsync(
+                b, conversationId, null, 20);
+
+            Assert.DoesNotContain(history, m => m.SenderUserId == a);
+            Assert.Contains(history, m => m.SenderUserId == c);
+        }
+
+        var bMessage = await SendAsync(
+            b, conversationId, Guid.NewGuid(), "B can still send");
+
+        Assert.Equal(b, bMessage.SenderUserId);
+
+        await using (var db = CreateContext())
+        {
+            var members = await db.ConversationMembers
+                .AsNoTracking()
+                .Where(m => m.ConversationId == conversationId)
+                .OrderBy(m => m.UserId)
+                .ToListAsync();
+
+            Assert.Equal(3, members.Count);
+            Assert.Contains(members, m => m.UserId == a && m.Role == "Admin" && m.LeftAt == null);
+            Assert.Contains(members, m => m.UserId == b && m.Role == "Member" && m.LeftAt == null);
+            Assert.Contains(members, m => m.UserId == c && m.Role == "Member" && m.LeftAt == null);
+        }
+
+        await using (var db = CreateContext())
+        {
+            await new BlockService(db).UnblockAsync(a, b);
+        }
+
+        await using (var db = CreateContext())
+        {
+            var history = await CreateService(db).GetHistoryAsync(
+                b, conversationId, null, 20);
+
+            Assert.Contains(history, m =>
+                m.SenderUserId == a && m.Body == "A old message");
+
+            Assert.Contains(history, m =>
+                m.SenderUserId == c && m.Body == "C message");
+        }
+    }
+
+    [Fact]
+    public async Task GroupBlock_FiltersBeforePaginationLimit()
+    {
+        var (a, b, c, conversationId) = await SeedGroupAsync();
+
+        await SendAsync(a, conversationId, Guid.NewGuid(), "A first");
+        await SendAsync(c, conversationId, Guid.NewGuid(), "C second");
+        await SendAsync(c, conversationId, Guid.NewGuid(), "C third");
+        await SendAsync(a, conversationId, Guid.NewGuid(), "A fourth");
+
+        await using (var db = CreateContext())
+        {
+            await new BlockService(db).BlockAsync(a, b);
+        }
+
+        await using (var db = CreateContext())
+        {
+            var history = await CreateService(db).GetHistoryAsync(
+                b, conversationId, null, 1);
+
+            var historyMessage = Assert.Single(history);
+            Assert.Equal(c, historyMessage.SenderUserId);
+            Assert.Equal("C third", historyMessage.Body);
+        }
+
+        await using (var db = CreateContext())
+        {
+            var newMessages = await CreateService(db).GetNewMessagesAsync(
+                b, conversationId, 0, 1);
+
+            var newMessage = Assert.Single(newMessages);
+            Assert.Equal(c, newMessage.SenderUserId);
+            Assert.Equal("C second", newMessage.Body);
+        }
+    }
+    private sealed class FailMessageSaveInterceptor : SaveChangesInterceptor
     {
         private readonly Guid _conversationId;
         private readonly long _expectedSequence;

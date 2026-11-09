@@ -124,18 +124,13 @@ builder.Services.AddCors(options =>
 
 // S1-02 application abstractions
 builder.Services.AddScoped<IAuthService, AuthService>();
-builder.Services.AddScoped<IConversationService, ConversationService>();
-builder.Services.AddScoped<IBlockService, BlockService>();
-builder.Services.AddScoped<IFriendshipService, FriendshipService>();
+builder.Services.AddScoped<IConversationService, Chat.Infrastructure.Services.ConversationService>();
+builder.Services.AddScoped<IBlockService, Chat.Infrastructure.Services.BlockService>();
+builder.Services.AddScoped<IFriendshipService, Chat.Infrastructure.Services.FriendshipService>();
 builder.Services.AddScoped<IAccountGateway, IdentityAccountGateway>();
-<<<<<<< HEAD
 builder.Services.AddScoped<IUserService, UserService>();
 builder.Services.AddScoped<IUserAccountGateway, IdentityUserAccountGateway>();
-=======
-builder.Services.AddScoped<IBlockService, BlockService>();
-builder.Services.AddScoped<IMessageService, MessageService>();
-
->>>>>>> f50182b (Implement CHAT-16 group message visibility)
+builder.Services.AddScoped<IMessageService, Chat.Infrastructure.Services.MessageService>();
 
 builder.Services.AddControllers();
 
@@ -160,7 +155,6 @@ builder.Services.Configure<Microsoft.AspNetCore.Mvc.ApiBehaviorOptions>(options 
         });
     };
 });
-builder.Services.AddScoped<IMessageService, MessageService>();
 // OpenAPI chuẩn .NET 10
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddOpenApi();
