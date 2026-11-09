@@ -1,6 +1,9 @@
+<<<<<<< HEAD
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+=======
+>>>>>>> f50182b (Implement CHAT-16 group message visibility)
 using Chat.Application.DTOs.Messages;
 
 namespace Chat.Application.Interfaces;

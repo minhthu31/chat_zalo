@@ -6,6 +6,7 @@ using Chat.Infrastructure.Data;
 using chat_zalo.Hubs;
 using chat_zalo.Services;
 using Chat.Infrastructure.Identity;
+using Chat.Infrastructure.Services;
 using Humanizer.Configuration;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
@@ -127,8 +128,14 @@ builder.Services.AddScoped<IConversationService, ConversationService>();
 builder.Services.AddScoped<IBlockService, BlockService>();
 builder.Services.AddScoped<IFriendshipService, FriendshipService>();
 builder.Services.AddScoped<IAccountGateway, IdentityAccountGateway>();
+<<<<<<< HEAD
 builder.Services.AddScoped<IUserService, UserService>();
 builder.Services.AddScoped<IUserAccountGateway, IdentityUserAccountGateway>();
+=======
+builder.Services.AddScoped<IBlockService, BlockService>();
+builder.Services.AddScoped<IMessageService, MessageService>();
+
+>>>>>>> f50182b (Implement CHAT-16 group message visibility)
 
 builder.Services.AddControllers();
 
