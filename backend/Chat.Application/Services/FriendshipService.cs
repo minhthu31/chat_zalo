@@ -175,6 +175,12 @@ public sealed class FriendshipService(ChatDbContext db) : IFriendshipService
             .AsNoTracking()
             .SingleOrDefaultAsync();
 
+    /// <summary>
+    /// Authoritative pairwise friendship check for operations such as inviting
+    /// a user to a group. Only Accepted is eligible; Pending, Rejected and
+    /// Cancelled relationships are not friendships. The caller must pass the
+    /// inviter and invitee for the specific invitation being authorized.
+    /// </summary>
     public Task<bool> AreFriendsAsync(Guid userAId, Guid userBId)
     {
         if (userAId == Guid.Empty || userBId == Guid.Empty || userAId == userBId)
@@ -185,6 +191,9 @@ public sealed class FriendshipService(ChatDbContext db) : IFriendshipService
             x.UserLowId == low && x.UserHighId == high && x.Status == "Accepted");
     }
 
+    /// <summary>
+    /// Reuses the Sprint 1 friends list query and returns Accepted relationships only.
+    /// </summary>
     public async Task<List<FriendshipDto>> GetFriendsAsync(Guid currentUserId)
     {
         var rows = await db.Friendships.AsNoTracking()
