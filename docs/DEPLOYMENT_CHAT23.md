@@ -1,5 +1,7 @@
 # CHAT-23: triển khai nhiều client dùng chung server
 
+**Chỉ cần demo bài nhóm, chưa có hosting?** Dùng hướng dẫn ngắn [DEMO_NHOM.md](DEMO_NHOM.md): chạy một lệnh để lấy link HTTPS tạm thời dùng chung. Máy chủ vẫn phải đang bật. Các phần bên dưới dành cho triển khai server độc lập.
+
 Một địa chỉ HTTPS phục vụ Blazor, `/api/*` và `/hubs/*`. Các máy/người dùng truy cập cùng website; chỉ backend kết nối PostgreSQL. Không đổi API/DTO/schema hoặc quy tắc nghiệp vụ của Sprint 1/2. Chức năng nhóm chỉ có thể sử dụng trên UI khi các task nhóm tương ứng hoàn thành.
 
 ## Chạy trên server Internet
@@ -62,6 +64,6 @@ Kết quả kiểm chứng local trên nền `main` commit `118727c`:
 - Docker build và chạy thực tế cả FE Caddy, API Production, PostgreSQL 18.6 và migration runner; migration runner áp dụng được toàn bộ migration lên DB test rỗng riêng trong container.
 - Smoke HTTPS qua với 3 client độc lập, cả WebSocket và toàn bộ luồng liệt kê phía trên. Cookie/data vẫn dùng được sau khi tạo lại container API.
 - `.env` local và dữ liệu/key/certificate không đưa lên Git. Workflow Deployment CI chạy lại build + smoke trên stack riêng khi mở PR.
-- Chưa triển khai Internet, chưa kiểm chứng từ nhiều máy vật lý: cần VPS/hosting và hostname thật. `https://localhost` chỉ là bản chạy thật tại máy, dùng chứng chỉ CA nội bộ.
+- Chế độ demo Quick Tunnel đã qua smoke với 3 client qua link HTTPS Internet, xác minh chứng chỉ bình thường và WebSocket thực tế. Chưa kiểm chứng từ nhiều máy vật lý hoặc tải lớn. Đây là tunnel tới máy chủ local, không phải hosting độc lập; máy phải đang bật. `https://localhost` vẫn là bản local dùng CA nội bộ. Muốn chạy độc lập 24/7 cần VPS/hosting và hostname thật.
 
 Tài liệu kỹ thuật: [ASP.NET Core forwarded headers](https://learn.microsoft.com/en-us/aspnet/core/host-and-deploy/proxy-load-balancer?view=aspnetcore-10.0), [EF migration deployment](https://learn.microsoft.com/ef/core/managing-schemas/migrations/applying), [Caddy automatic HTTPS](https://caddyserver.com/docs/automatic-https), [Npgsql GSSAPI](https://www.npgsql.org/doc/security.html).

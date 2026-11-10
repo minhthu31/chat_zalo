@@ -32,6 +32,8 @@ jobs:
           pathlib.Path('deploy/.env').write_text('CHAT_DOMAIN=localhost\nPOSTGRES_PASSWORD=' + secrets.token_hex(32) + '\n')
           PY
           pip install -r deploy/requirements-smoke.txt
+      - name: Validate optional demo configuration without publishing a tunnel in CI
+        run: docker compose --env-file deploy/.env -f deploy/compose.yml -f deploy/compose.demo.yml config --quiet
       - name: Build and start real deployment
         run: docker compose --env-file deploy/.env -f deploy/compose.yml up -d --build
       - name: Wait for HTTPS
