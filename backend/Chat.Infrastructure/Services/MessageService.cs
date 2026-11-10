@@ -1,30 +1,29 @@
-using System;
-using System.Collections.Generic;
-using System.Data;
-using System.Linq;
-using System.Threading.Tasks;
+﻿using System.Data;
 using Chat.Application.DTOs.Messages;
-using Chat.Application.Services;
 using Chat.Application.Interfaces;
+using Chat.Application.Services;
 using Chat.Domain.Entities;
 using Chat.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
-namespace Chat.Application.Services;
+namespace Chat.Infrastructure.Services;
 
 public sealed class MessageService : IMessageService
 {
     private readonly ChatDbContext _db;
+    private readonly IBlockService _blockService;
     private readonly IConversationEventPublisher _eventPublisher;
     private readonly ILogger<MessageService> _logger;
 
     public MessageService(
         ChatDbContext db,
+        IBlockService blockService,
         IConversationEventPublisher eventPublisher,
         ILogger<MessageService> logger)
     {
         _db = db;
+        _blockService = blockService;
         _eventPublisher = eventPublisher;
         _logger = logger;
     }
@@ -44,15 +43,14 @@ public sealed class MessageService : IMessageService
             throw new MessageServiceException(
                 400,
                 "VALIDATION_ERROR",
-                "clientMessageId phải khác rỗng; body phải dài 1–4000 ký tự.");
+                "clientMessageId không được rỗng; body phải từ 1 đến 4000 ký tự.");
         }
 
         await using var transaction =
             await _db.Database.BeginTransactionAsync(
                 IsolationLevel.ReadCommitted);
 
-        // Khóa hội thoại trước khi kiểm tra retry và cấp Seq.
-        // Các request gửi trong cùng hội thoại sẽ xử lý lần lượt.
+        // Khóa hội thoại để tránh cấp trùng Seq khi gửi đồng thời.
         var conversations = await _db.Conversations
             .FromSqlInterpolated($"""
                 SELECT *
@@ -66,12 +64,19 @@ public sealed class MessageService : IMessageService
         if (conversations.Count == 0)
         {
             throw new MessageServiceException(
-                404, "NOT_FOUND", "Không tìm thấy hội thoại.");
+                404,
+                "NOT_FOUND",
+                "conversation not found");
         }
 
-        await EnsureAccessAsync(
-            currentUserId, conversationId, forSending: true);
+        var conversation = conversations[0];
 
+        await EnsureAccessAsync(
+            currentUserId,
+            conversation,
+            forSending: true);
+
+        // Chống gửi trùng khi client retry.
         var existing = await _db.Messages
             .AsNoTracking()
             .SingleOrDefaultAsync(m =>
@@ -82,14 +87,14 @@ public sealed class MessageService : IMessageService
         if (existing is not null)
         {
             if (!string.Equals(
-                    existing.Body,
-                    request.Body,
-                    StringComparison.Ordinal))
+                existing.Body,
+                request.Body,
+                StringComparison.Ordinal))
             {
                 throw new MessageServiceException(
                     409,
                     "CLIENT_MESSAGE_ID_CONFLICT",
-                    "ClientMessageId đã được sử dụng với nội dung khác.");
+                    "clientMessageId đã được sử dụng cho nội dung khác.");
             }
 
             await transaction.CommitAsync();
@@ -104,7 +109,9 @@ public sealed class MessageService : IMessageService
                 .SetProperty(
                     c => c.LastMessageSeq,
                     c => c.LastMessageSeq + 1)
-                .SetProperty(c => c.LastActivityAt, now));
+                .SetProperty(
+                    c => c.LastActivityAt,
+                    now));
 
         var seq = await _db.Conversations
             .AsNoTracking()
@@ -136,7 +143,9 @@ public sealed class MessageService : IMessageService
             throw;
         }
 
+        // Chỉ gửi thông báo sau khi dữ liệu đã commit.
         var eventId = Guid.NewGuid();
+
         try
         {
             await _eventPublisher.NotifyConversationChangedAsync(
@@ -146,14 +155,10 @@ public sealed class MessageService : IMessageService
         }
         catch (Exception exception)
         {
-            // Persistence has committed. A notification failure must not make
-            // the API report a failed send for a message that is already stored.
             _logger.LogError(
                 exception,
-                "Failed to publish ConversationChanged for conversation {ConversationId}, event {EventId}, seq {LatestSeq}.",
-                conversationId,
-                eventId,
-                message.Seq);
+                "Failed to notify conversation {ConversationId}",
+                conversationId);
         }
 
         return ToResponse(message, isNewlyCreated: true);
@@ -168,19 +173,38 @@ public sealed class MessageService : IMessageService
         ValidateIds(currentUserId, conversationId);
         ValidatePagination(beforeSeq, limit);
 
+        var member = await GetActiveMemberAsync(
+            currentUserId,
+            conversationId);
+
+        var conversation = await GetConversationAsync(conversationId);
+
         await EnsureAccessAsync(
-            currentUserId, conversationId, forSending: false);
+            currentUserId,
+            conversation,
+            forSending: false);
 
         var query = _db.Messages
             .AsNoTracking()
-            .Where(m => m.ConversationId == conversationId);
+            .Where(m =>
+                m.ConversationId == conversationId &&
+                m.Seq >= member.JoinedSeq);
+
+        // CHAT-16: lọc tin nhắn của người đã chặn mình trong nhóm.
+        // Phải lọc trước OrderBy và Take để trang có đủ tin nhắn.
+        if (conversation.Kind == "Group")
+        {
+            query = query.Where(m =>
+                !_db.UserBlocks.Any(b =>
+                    b.BlockerUserId == m.SenderUserId &&
+                    b.BlockedUserId == currentUserId));
+        }
 
         if (beforeSeq.HasValue)
         {
             query = query.Where(m => m.Seq < beforeSeq.Value);
         }
 
-        // Lấy trang gần nhất, sau đó trả theo Seq tăng dần.
         var messages = await query
             .OrderByDescending(m => m.Seq)
             .Take(limit)
@@ -188,7 +212,9 @@ public sealed class MessageService : IMessageService
 
         messages.Reverse();
 
-        return messages.Select(m => ToResponse(m)).ToList();
+        return messages
+            .Select(m => ToResponse(m))
+            .ToList();
     }
 
     public async Task<List<MessageResponse>> GetNewMessagesAsync(
@@ -200,31 +226,53 @@ public sealed class MessageService : IMessageService
         ValidateIds(currentUserId, conversationId);
         ValidatePagination(afterSeq, limit);
 
-        await EnsureAccessAsync(
-            currentUserId, conversationId, forSending: false);
+        var member = await GetActiveMemberAsync(
+            currentUserId,
+            conversationId);
 
-        // Lấy những tin đầu tiên ngay sau cursor.
-        var messages = await _db.Messages
+        var conversation = await GetConversationAsync(conversationId);
+
+        await EnsureAccessAsync(
+            currentUserId,
+            conversation,
+            forSending: false);
+
+        var query = _db.Messages
             .AsNoTracking()
             .Where(m =>
                 m.ConversationId == conversationId &&
-                m.Seq > afterSeq)
+                m.Seq > afterSeq &&
+                m.Seq >= member.JoinedSeq);
+
+        // CHAT-16: chỉ lọc tin nhắn bị chặn trong Group.
+        if (conversation.Kind == "Group")
+        {
+            query = query.Where(m =>
+                !_db.UserBlocks.Any(b =>
+                    b.BlockerUserId == m.SenderUserId &&
+                    b.BlockedUserId == currentUserId));
+        }
+
+        var messages = await query
             .OrderBy(m => m.Seq)
             .Take(limit)
             .ToListAsync();
 
-        return messages.Select(m => ToResponse(m)).ToList();
+        return messages
+            .Select(m => ToResponse(m))
+            .ToList();
     }
 
     private async Task EnsureAccessAsync(
         Guid currentUserId,
-        Guid conversationId,
+        Conversation conversation,
         bool forSending)
     {
+        // Thành viên đang hoạt động mới được truy cập.
         var isMember = await _db.ConversationMembers
             .AsNoTracking()
             .AnyAsync(m =>
-                m.ConversationId == conversationId &&
+                m.ConversationId == conversation.Id &&
                 m.UserId == currentUserId &&
                 m.LeftAt == null);
 
@@ -233,10 +281,35 @@ public sealed class MessageService : IMessageService
             throw AccessDenied();
         }
 
+        // CHAT-16: nhóm không áp dụng quy tắc chặn của chat 1-1.
+        if (conversation.Kind == "Group")
+        {
+            if (forSending)
+            {
+                var groupIsActive = await _db.GroupConversations
+                    .AsNoTracking()
+                    .AnyAsync(g =>
+                        g.ConversationId == conversation.Id &&
+                        g.DeletedAt == null);
+
+                if (!groupIsActive)
+                {
+                    throw AccessDenied();
+                }
+            }
+
+            return;
+        }
+
+        if (conversation.Kind != "Direct")
+        {
+            throw AccessDenied();
+        }
+
         var direct = await _db.DirectConversations
             .AsNoTracking()
             .SingleOrDefaultAsync(d =>
-                d.ConversationId == conversationId);
+                d.ConversationId == conversation.Id);
 
         if (direct is null ||
             (direct.UserLowId != currentUserId &&
@@ -250,11 +323,9 @@ public sealed class MessageService : IMessageService
             : direct.UserLowId;
 
         // Người bị đối phương chặn không được đọc hoặc gửi.
-        var blockedByPeer = await _db.UserBlocks
-            .AsNoTracking()
-            .AnyAsync(b =>
-                b.BlockerUserId == peerId &&
-                b.BlockedUserId == currentUserId);
+        var blockedByPeer = await _blockService.HasBlockedAsync(
+            peerId,
+            currentUserId);
 
         if (blockedByPeer)
         {
@@ -267,16 +338,15 @@ public sealed class MessageService : IMessageService
             return;
         }
 
-        var blockedByCurrentUser = await _db.UserBlocks
-            .AsNoTracking()
-            .AnyAsync(b =>
-                b.BlockerUserId == currentUserId &&
-                b.BlockedUserId == peerId);
+        var blockedByCurrentUser =
+            await _blockService.HasBlockedAsync(
+                currentUserId,
+                peerId);
 
         var peerIsMember = await _db.ConversationMembers
             .AsNoTracking()
             .AnyAsync(m =>
-                m.ConversationId == conversationId &&
+                m.ConversationId == conversation.Id &&
                 m.UserId == peerId &&
                 m.LeftAt == null);
 
@@ -287,10 +357,38 @@ public sealed class MessageService : IMessageService
                 f.UserHighId == direct.UserHighId &&
                 f.Status == "Accepted");
 
-        if (blockedByCurrentUser || !peerIsMember || !areFriends)
+        if (blockedByCurrentUser ||
+            !peerIsMember ||
+            !areFriends)
         {
             throw AccessDenied();
         }
+    }
+
+    private async Task<ConversationMember> GetActiveMemberAsync(
+        Guid userId,
+        Guid conversationId)
+    {
+        var member = await _db.ConversationMembers
+            .AsNoTracking()
+            .FirstOrDefaultAsync(m =>
+                m.UserId == userId &&
+                m.ConversationId == conversationId &&
+                m.LeftAt == null);
+
+        return member ?? throw AccessDenied();
+    }
+
+    private async Task<Conversation> GetConversationAsync(
+        Guid conversationId)
+    {
+        return await _db.Conversations
+            .AsNoTracking()
+            .FirstOrDefaultAsync(c => c.Id == conversationId)
+            ?? throw new MessageServiceException(
+                404,
+                "NOT_FOUND",
+                "conversation not found");
     }
 
     private static void ValidateIds(
@@ -300,7 +398,9 @@ public sealed class MessageService : IMessageService
         if (currentUserId == Guid.Empty)
         {
             throw new MessageServiceException(
-                401, "UNAUTHORIZED", "Bạn chưa đăng nhập.");
+                401,
+                "UNAUTHORIZED",
+                "Bạn chưa đăng nhập.");
         }
 
         if (conversationId == Guid.Empty)
@@ -312,14 +412,16 @@ public sealed class MessageService : IMessageService
         }
     }
 
-    private static void ValidatePagination(long? cursor, int limit)
+    private static void ValidatePagination(
+        long? cursor,
+        int limit)
     {
         if (cursor is < 0 || limit is < 1 or > 100)
         {
             throw new MessageServiceException(
                 400,
                 "INVALID_PAGINATION_PARAMETERS",
-                "Mốc Seq phải không âm; limit phải từ 1 đến 100.");
+                "Seq phải không âm; limit phải từ 1 đến 100.");
         }
     }
 

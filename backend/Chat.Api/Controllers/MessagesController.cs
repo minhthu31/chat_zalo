@@ -1,12 +1,13 @@
+
+using Chat.Api.Filters;
+using Chat.Application.DTOs.Messages;
+using Chat.Application.Interfaces;
+using Chat.Application.Services;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using System;
 using System.Security.Claims;
 using System.Threading.Tasks;
-using Chat.Api.Filters;
-using Chat.Application.DTOs.Messages;
-using Chat.Application.Services;
-using Chat.Application.Interfaces;
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
 
 namespace Chat.Api.Controllers;
 
@@ -33,7 +34,7 @@ public sealed class MessagesController : ControllerBase
             return Unauthorized(new
             {
                 code = "UNAUTHORIZED",
-                message = "Không xác định được người dùng."
+                message = "Unable to identify the current user."
             });
         }
 
@@ -69,7 +70,7 @@ public sealed class MessagesController : ControllerBase
             return Unauthorized(new
             {
                 code = "UNAUTHORIZED",
-                message = "Không xác định được người dùng."
+                message = "Unable to identify the current user."
             });
         }
 
@@ -78,7 +79,7 @@ public sealed class MessagesController : ControllerBase
             return BadRequest(new
             {
                 code = "INVALID_PAGINATION_PARAMETERS",
-                message = "Không được truyền đồng thời beforeSeq và afterSeq."
+                message = "beforeSeq and afterSeq cannot be used together."
             });
         }
 

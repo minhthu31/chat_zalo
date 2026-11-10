@@ -2,7 +2,7 @@ using Chat.Application.Interfaces;
 using Chat.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 
-namespace Chat.Application.Services;
+namespace Chat.Infrastructure.Services;
 
 public sealed class BlockService(ChatDbContext db) : IBlockService
 {
@@ -51,3 +51,4 @@ public sealed class BlockException(int statusCode, string code, string message) 
     public int StatusCode { get; } = statusCode;
     public string Code { get; } = code;
 }
+

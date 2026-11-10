@@ -43,6 +43,58 @@ public sealed class UserService : IUserService
         return users.ToList();
     }
 
+    public async Task<PagedUsersResponse> SearchPagedAsync(
+        string username,
+        int page,
+        int pageSize)
+    {
+        if (string.IsNullOrWhiteSpace(username))
+        {
+            throw new ArgumentException("Username is required.");
+        }
+
+        var normalizedUsername = username.Trim();
+
+        if (normalizedUsername.Length > MaxUsernameLength)
+        {
+            throw new ArgumentException(
+                $"Username must not exceed {MaxUsernameLength} characters.");
+        }
+
+        if (page < 1)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(page),
+                page,
+                "Page must be greater than or equal to 1.");
+        }
+
+        if (pageSize < 1 || pageSize > PagedUsersResponse.MaxPageSize)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(pageSize),
+                pageSize,
+                $"PageSize must be between 1 and {PagedUsersResponse.MaxPageSize}.");
+        }
+
+        var (items, totalCount) = await _users.SearchByUsernamePagedAsync(
+            normalizedUsername,
+            page,
+            pageSize);
+
+        // long arithmetic avoids overflow when totalCount is close to int.MaxValue.
+        var totalPages = (int)((totalCount + (long)pageSize - 1) / pageSize);
+
+        return new PagedUsersResponse
+        {
+            Items = items.ToList(),
+            Page = page,
+            PageSize = pageSize,
+            TotalCount = totalCount,
+            TotalPages = totalPages
+        };
+    }
+
     public async Task<UserDto> UpdateProfileAsync(
         Guid userId,
         UpdateProfileRequest request)

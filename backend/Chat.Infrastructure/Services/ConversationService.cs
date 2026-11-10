@@ -5,7 +5,7 @@ using Chat.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 
-namespace Chat.Application.Services;
+namespace Chat.Infrastructure.Services;
 
 public class ConversationService : IConversationService
 {
