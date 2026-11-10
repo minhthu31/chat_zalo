@@ -24,7 +24,7 @@
         <InputText id="password" type="@(_showPassword ? "text" : "password")" autocomplete="new-password" @bind-Value="_model.Password" />
         <ValidationMessage For="() => _model.Password" />
         <label class="show-pw"><input type="checkbox" @bind="_showPassword" /> Hiện mật khẩu</label>
-        <p class="hint">Mật khẩu cần ít nhất 6 ký tự, có chữ hoa, chữ số và ký tự đặc biệt (ví dụ Passw0rd!x).</p>
+        <p class="hint">Mật khẩu từ 6 đến 256 ký tự, gồm chữ hoa, chữ thường, chữ số và ký tự đặc biệt.</p>
     </div>
 
     @if (_error is not null)
@@ -70,7 +70,7 @@
                 "EMAIL_ALREADY_EXISTS" => "Email đã được sử dụng.",
                 "CONFLICT" => "Tên đăng nhập hoặc email đã được sử dụng.",
                 "INVALID_CSRF_TOKEN" => "Phiên làm việc hết hạn, vui lòng tải lại trang.",
-                "VALIDATION_ERROR" => "Dữ liệu nhập chưa hợp lệ.",
+                "VALIDATION_ERROR" => ValidationError(ex.Message),
                 _ => "Không thể đăng ký, vui lòng thử lại."
             };
         }
@@ -78,6 +78,21 @@
         {
             _busy = false;
         }
+    }
+
+    private static string ValidationError(string message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+            return "Vui lòng kiểm tra tên đăng nhập, email và mật khẩu.";
+
+        // Preserve the server's specific validation reason instead of hiding it.
+        // Identity's default messages are translated; custom messages pass through.
+        return message
+            .Replace("Passwords must be at least 6 characters.", "Mật khẩu cần ít nhất 6 ký tự.", StringComparison.Ordinal)
+            .Replace("Passwords must have at least one non alphanumeric character.", "Mật khẩu cần ít nhất một ký tự đặc biệt, như ! hoặc @.", StringComparison.Ordinal)
+            .Replace("Passwords must have at least one digit ('0'-'9').", "Mật khẩu cần ít nhất một chữ số (0–9).", StringComparison.Ordinal)
+            .Replace("Passwords must have at least one lowercase ('a'-'z').", "Mật khẩu cần ít nhất một chữ thường (a–z).", StringComparison.Ordinal)
+            .Replace("Passwords must have at least one uppercase ('A'-'Z').", "Mật khẩu cần ít nhất một chữ hoa (A–Z).", StringComparison.Ordinal);
     }
 
     private class RegisterInput

@@ -22,8 +22,10 @@ ENTRYPOINT ["dotnet", "Chat.Migrator.dll"]
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS web-build
 WORKDIR /src
 COPY global.json ./
+COPY frontend/Chat.Client.csproj frontend/
+RUN dotnet restore frontend/Chat.Client.csproj
 COPY frontend/ frontend/
-RUN dotnet publish frontend/Chat.Client.csproj -c Release -o /out/web
+RUN dotnet publish frontend/Chat.Client.csproj -c Release --no-restore -o /out/web
 RUN printf '{"ApiBaseUrl":"/"}\n' > /out/web/wwwroot/appsettings.json
 
 FROM caddy:2 AS web
