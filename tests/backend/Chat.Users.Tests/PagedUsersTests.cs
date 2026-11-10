@@ -27,6 +27,8 @@ namespace Chat.Users.Tests;
 public sealed class PagedUsersTests
 {
     private static readonly Guid CallerId = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+    private const string CallerUsername = "paged_test_caller";
+    private const string CallerSecurityStamp = "SECRET_STAMP_paged_test_caller";
 
     private static ApplicationUser CreateUser(Guid id, string username, string displayName)
     {
@@ -62,6 +64,13 @@ public sealed class PagedUsersTests
         IReadOnlyList<ApplicationUser> users,
         List<string>? executedSqlLog = null)
     {
+        // SecurityStampValidator reloads the authenticated caller from the Identity store.
+        // Include that caller in the interceptor's in-memory user set so the cookie
+        // represents a real test user with a matching Security Stamp.
+        var testUsers = users
+            .Append(CreateUser(CallerId, CallerUsername, "Paged Test Caller"))
+            .ToList();
+
         return new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
             builder.ConfigureTestServices(services =>
             {
@@ -73,7 +82,7 @@ public sealed class PagedUsersTests
                     options.UseNpgsql("Host=localhost;Database=chat_unit_sim;Username=sim;Password=sim")
                         .AddInterceptors(
                             new SuppressConnectionInterceptor(),
-                            new PagedUsersCommandInterceptor(users, executedSqlLog)));
+                            new PagedUsersCommandInterceptor(testUsers, executedSqlLog)));
             }));
     }
 
@@ -82,8 +91,15 @@ public sealed class PagedUsersTests
         var options = factory.Services
             .GetRequiredService<IOptionsMonitor<CookieAuthenticationOptions>>()
             .Get(IdentityConstants.ApplicationScheme);
+        var identityOptions = factory.Services
+            .GetRequiredService<IOptions<IdentityOptions>>()
+            .Value;
         var identity = new ClaimsIdentity(
-            new[] { new Claim(ClaimTypes.NameIdentifier, userId.ToString()) },
+            new[]
+            {
+                new Claim(ClaimTypes.NameIdentifier, userId.ToString()),
+                new Claim(identityOptions.ClaimsIdentity.SecurityStampClaimType, CallerSecurityStamp)
+            },
             IdentityConstants.ApplicationScheme);
         var ticket = new AuthenticationTicket(
             new ClaimsPrincipal(identity),
@@ -502,12 +518,45 @@ public sealed class PagedUsersTests
         private DbDataReader Execute(DbCommand cmd)
         {
             var sql = cmd.CommandText;
+
+            // SecurityStampValidator first reloads the authenticated user, then
+            // asks Identity for that user's claims. These are not paging queries.
+            if (sql.Contains("FROM \"Users\" AS u", StringComparison.Ordinal) &&
+                sql.Contains("WHERE u.\"Id\" = @p", StringComparison.Ordinal))
+            {
+                return ExecuteIdentityUserLookup(cmd);
+            }
+
+            if (sql.Contains("FROM \"UserClaims\" AS u", StringComparison.Ordinal))
+            {
+                var claimsTable = new DataTable();
+                claimsTable.Columns.Add("Id", typeof(int));
+                claimsTable.Columns.Add("ClaimType", typeof(string));
+                claimsTable.Columns.Add("ClaimValue", typeof(string));
+                claimsTable.Columns.Add("UserId", typeof(Guid));
+                return claimsTable.CreateDataReader();
+            }
+
+            // Only the Users username search queries belong to this paging
+            // interceptor. Do not interpret unrelated Identity SQL as LIKE SQL.
+            if (!sql.Contains("FROM \"Users\" AS u", StringComparison.Ordinal) ||
+                !sql.Contains("LIKE", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    $"PagedUsersCommandInterceptor received an unsupported SQL query: {sql}");
+            }
+
             _sqlLog?.Add(sql);
 
-            var pattern = (string)cmd.Parameters
+            var patternParameter = cmd.Parameters
                 .Cast<DbParameter>()
-                .Single(p => p.Value is string)
-                .Value!;
+                .FirstOrDefault(parameter => parameter.Value is string);
+
+            if (patternParameter?.Value is not string pattern)
+            {
+                throw new InvalidOperationException(
+                    "Paged users query did not contain a string LIKE parameter.");
+            }
 
             var regex = LikePatternToRegex(pattern);
             IEnumerable<ApplicationUser> matching = _users
@@ -548,6 +597,58 @@ public sealed class PagedUsersTests
             }
 
             return resultTable.CreateDataReader();
+        }
+
+        private DbDataReader ExecuteIdentityUserLookup(DbCommand cmd)
+        {
+            var idParameter = cmd.Parameters
+                .Cast<DbParameter>()
+                .FirstOrDefault(parameter => parameter.Value is Guid);
+            var requestedId = idParameter?.Value is Guid id ? id : Guid.Empty;
+            var user = _users.SingleOrDefault(candidate => candidate.Id == requestedId);
+
+            var table = new DataTable();
+            table.Columns.Add("Id", typeof(Guid));
+            table.Columns.Add("AccessFailedCount", typeof(int));
+            table.Columns.Add("ConcurrencyStamp", typeof(string));
+            table.Columns.Add("CreatedAt", typeof(DateTimeOffset));
+            table.Columns.Add("DisplayName", typeof(string));
+            table.Columns.Add("Email", typeof(string));
+            table.Columns.Add("EmailConfirmed", typeof(bool));
+            table.Columns.Add("LockoutEnabled", typeof(bool));
+            table.Columns.Add("LockoutEnd", typeof(DateTimeOffset));
+            table.Columns.Add("NormalizedEmail", typeof(string));
+            table.Columns.Add("NormalizedUserName", typeof(string));
+            table.Columns.Add("PasswordHash", typeof(string));
+            table.Columns.Add("PhoneNumber", typeof(string));
+            table.Columns.Add("PhoneNumberConfirmed", typeof(bool));
+            table.Columns.Add("SecurityStamp", typeof(string));
+            table.Columns.Add("TwoFactorEnabled", typeof(bool));
+            table.Columns.Add("UserName", typeof(string));
+
+            if (user is not null)
+            {
+                table.Rows.Add(
+                    user.Id,
+                    user.AccessFailedCount,
+                    (object?)user.ConcurrencyStamp ?? DBNull.Value,
+                    user.CreatedAt,
+                    (object?)user.DisplayName ?? DBNull.Value,
+                    (object?)user.Email ?? DBNull.Value,
+                    user.EmailConfirmed,
+                    user.LockoutEnabled,
+                    user.LockoutEnd.HasValue ? (object)user.LockoutEnd.Value : DBNull.Value,
+                    (object?)user.NormalizedEmail ?? DBNull.Value,
+                    (object?)user.NormalizedUserName ?? DBNull.Value,
+                    (object?)user.PasswordHash ?? DBNull.Value,
+                    (object?)user.PhoneNumber ?? DBNull.Value,
+                    user.PhoneNumberConfirmed,
+                    (object?)user.SecurityStamp ?? DBNull.Value,
+                    user.TwoFactorEnabled,
+                    (object?)user.UserName ?? DBNull.Value);
+            }
+
+            return table.CreateDataReader();
         }
 
         private static int? ReadIntClause(string sql, DbCommand cmd, string keyword)
