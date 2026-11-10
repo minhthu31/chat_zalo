@@ -537,6 +537,16 @@ public sealed class PagedUsersTests
                 return claimsTable.CreateDataReader();
             }
 
+            // AddRoles<IdentityRole<Guid>>() causes SecurityStampValidator to
+            // query UserRoles (joined with Roles) when refreshing the principal.
+            // Return an empty result so the user simply has no roles assigned.
+            if (sql.Contains("\"UserRoles\"", StringComparison.Ordinal))
+            {
+                var rolesTable = new DataTable();
+                rolesTable.Columns.Add("Name", typeof(string));
+                return rolesTable.CreateDataReader();
+            }
+
             // Only the Users username search queries belong to this paging
             // interceptor. Do not interpret unrelated Identity SQL as LIKE SQL.
             if (!sql.Contains("FROM \"Users\" AS u", StringComparison.Ordinal) ||
