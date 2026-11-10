@@ -1,0 +1,1 @@
+global using Chat.Infrastructure.Services;

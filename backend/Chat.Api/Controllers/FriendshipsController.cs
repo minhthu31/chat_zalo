@@ -3,6 +3,7 @@ using Chat.Api.Filters;
 using Chat.Application.DTOs.Friendships;
 using Chat.Application.Interfaces;
 using Chat.Application.Services;
+using Chat.Infrastructure.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 

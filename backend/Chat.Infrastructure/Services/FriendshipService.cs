@@ -5,7 +5,7 @@ using Chat.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 
-namespace Chat.Application.Services;
+namespace Chat.Infrastructure.Services;
 
 /// <summary>Implements the friendship lifecycle against the canonical, unordered user pair.</summary>
 public sealed class FriendshipService(ChatDbContext db) : IFriendshipService
@@ -309,3 +309,4 @@ public sealed class FriendshipException(int statusCode, string code, string mess
     public int StatusCode { get; } = statusCode;
     public string Code { get; } = code;
 }
+

@@ -7,6 +7,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Chat.Domain\Chat.Domain.csproj" />
+    <ProjectReference Include="..\Chat.Application\Chat.Application.csproj" />
   </ItemGroup>
 
   <ItemGroup>
