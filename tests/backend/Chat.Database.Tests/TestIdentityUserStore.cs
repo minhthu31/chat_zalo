@@ -67,10 +67,10 @@ internal sealed class TestIdentityUserStore : IUserStore<ApplicationUser>, IUser
         return Task.FromResult(user);
     }
 
-    public Task<string?> GetUserIdAsync(ApplicationUser user, CancellationToken cancellationToken)
+    public Task<string> GetUserIdAsync(ApplicationUser user, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult<string?>(user.Id.ToString());
+        return Task.FromResult(user.Id.ToString());
     }
 
     public Task<string?> GetUserNameAsync(ApplicationUser user, CancellationToken cancellationToken)
