@@ -284,6 +284,20 @@ public sealed class MessageService : IMessageService
         // CHAT-16: nhóm không áp dụng quy tắc chặn của chat 1-1.
         if (conversation.Kind == "Group")
         {
+            if (forSending)
+            {
+                var groupIsActive = await _db.GroupConversations
+                    .AsNoTracking()
+                    .AnyAsync(g =>
+                        g.ConversationId == conversation.Id &&
+                        g.DeletedAt == null);
+
+                if (!groupIsActive)
+                {
+                    throw AccessDenied();
+                }
+            }
+
             return;
         }
 

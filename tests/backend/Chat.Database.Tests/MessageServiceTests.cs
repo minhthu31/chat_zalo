@@ -766,6 +766,29 @@ public sealed class MessageServiceTests
     }
 
     [Fact]
+    public async Task DissolvedGroup_CannotSendMessages()
+    {
+        var (a, _, _, conversationId) = await SeedGroupAsync();
+
+        await using (var db = CreateContext())
+        {
+            var group = await db.GroupConversations
+                .SingleAsync(g => g.ConversationId == conversationId);
+
+            group.DeletedAt = DateTimeOffset.UtcNow;
+
+            await db.SaveChangesAsync();
+        }
+
+        await Assert.ThrowsAsync<MessageServiceException>(
+            () => SendAsync(
+                a,
+                conversationId,
+                Guid.NewGuid(),
+                "Cannot send to dissolved group"));
+    }
+
+    [Fact]
     public async Task GroupBlock_HidesMessages_AllowsSending_PreservesMembership_AndUnblockRestoresHistory()
     {
         var (a, b, c, conversationId) = await SeedGroupAsync();
