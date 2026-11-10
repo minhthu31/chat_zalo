@@ -10,4 +10,6 @@ public interface IAuthService
     Task<UserResponse> LoginAsync(LoginRequest request);
 
     Task LogoutAsync();
+
+    Task ChangePasswordAsync(Guid userId, ChangePasswordRequest request);
 }

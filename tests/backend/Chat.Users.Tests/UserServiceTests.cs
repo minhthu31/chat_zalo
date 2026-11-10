@@ -248,6 +248,11 @@ public sealed class UsersApiTests
             {
                 services.RemoveAll<IUserAccountGateway>();
                 services.AddScoped<IUserAccountGateway>(_ => gateway);
+
+                // Keep the real Identity SecurityStampValidator active while providing
+                // deterministic Identity users without requiring PostgreSQL in these API tests.
+                services.RemoveAll<IUserStore<ApplicationUser>>();
+                services.AddSingleton<IUserStore<ApplicationUser>, TestIdentityUserStore>();
             }));
 
     private static FakeUserAccountGateway CreateSeededGateway()
@@ -260,11 +265,19 @@ public sealed class UsersApiTests
 
     private static void Authenticate(WebApplicationFactory<Program> factory, HttpClient client, Guid userId)
     {
+        var store = (TestIdentityUserStore)factory.Services.GetRequiredService<IUserStore<ApplicationUser>>();
+        var user = store.EnsureUser(userId);
+        var identityOptions = factory.Services.GetRequiredService<IOptions<IdentityOptions>>().Value;
         var options = factory.Services
             .GetRequiredService<IOptionsMonitor<CookieAuthenticationOptions>>()
             .Get(IdentityConstants.ApplicationScheme);
         var identity = new ClaimsIdentity(
-            new[] { new Claim(ClaimTypes.NameIdentifier, userId.ToString()) },
+            new[]
+            {
+                new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
+                new Claim(ClaimTypes.Name, user.UserName!),
+                new Claim(identityOptions.ClaimsIdentity.SecurityStampClaimType, user.SecurityStamp!)
+            },
             IdentityConstants.ApplicationScheme);
         var ticket = new AuthenticationTicket(
             new ClaimsPrincipal(identity),

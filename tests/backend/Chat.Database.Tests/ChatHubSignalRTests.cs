@@ -205,8 +205,17 @@ public sealed class ChatHubSignalRTests
         var cookieOptions = factory.Services
             .GetRequiredService<IOptionsMonitor<CookieAuthenticationOptions>>()
             .Get(scheme);
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ChatDbContext>();
+        var user = db.Users.Single(candidate => candidate.Id == userId);
+        var identityOptions = factory.Services.GetRequiredService<IOptions<IdentityOptions>>().Value;
         var identity = new ClaimsIdentity(
-            [new Claim(ClaimTypes.NameIdentifier, userId.ToString())],
+            [
+                new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
+                new Claim(ClaimTypes.Name, user.UserName ?? string.Empty),
+                new Claim(identityOptions.ClaimsIdentity.SecurityStampClaimType,
+                    user.SecurityStamp ?? throw new InvalidOperationException("Test user has no Security Stamp."))
+            ],
             scheme);
         var ticket = new AuthenticationTicket(
             new ClaimsPrincipal(identity),
@@ -247,13 +256,16 @@ public sealed class ChatHubSignalRTests
     [Fact]
     public async Task Hub_RejectsAnonymousConnection_AndAcceptsIdentityCookie()
     {
+        await using var database = await TestDatabase.CreateAsync();
+        var userId = await database.AddUserAsync();
+
         using var factory = CreateFactory();
         await using var anonymous = CreateConnection(factory);
 
         Assert.NotNull(await Record.ExceptionAsync(() => anonymous.StartAsync()));
         Assert.NotEqual(HubConnectionState.Connected, anonymous.State);
 
-        await using var authenticated = CreateConnection(factory, Guid.NewGuid());
+        await using var authenticated = CreateConnection(factory, userId);
         await authenticated.StartAsync();
         Assert.Equal(HubConnectionState.Connected, authenticated.State);
     }
