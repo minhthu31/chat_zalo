@@ -256,13 +256,16 @@ public sealed class ChatHubSignalRTests
     [Fact]
     public async Task Hub_RejectsAnonymousConnection_AndAcceptsIdentityCookie()
     {
+        await using var database = await TestDatabase.CreateAsync();
+        var userId = await database.AddUserAsync();
+
         using var factory = CreateFactory();
         await using var anonymous = CreateConnection(factory);
 
         Assert.NotNull(await Record.ExceptionAsync(() => anonymous.StartAsync()));
         Assert.NotEqual(HubConnectionState.Connected, anonymous.State);
 
-        await using var authenticated = CreateConnection(factory, Guid.NewGuid());
+        await using var authenticated = CreateConnection(factory, userId);
         await authenticated.StartAsync();
         Assert.Equal(HubConnectionState.Connected, authenticated.State);
     }
