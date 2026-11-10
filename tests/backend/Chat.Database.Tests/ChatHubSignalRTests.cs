@@ -205,8 +205,17 @@ public sealed class ChatHubSignalRTests
         var cookieOptions = factory.Services
             .GetRequiredService<IOptionsMonitor<CookieAuthenticationOptions>>()
             .Get(scheme);
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ChatDbContext>();
+        var user = db.Users.Single(candidate => candidate.Id == userId);
+        var identityOptions = factory.Services.GetRequiredService<IOptions<IdentityOptions>>().Value;
         var identity = new ClaimsIdentity(
-            [new Claim(ClaimTypes.NameIdentifier, userId.ToString())],
+            [
+                new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
+                new Claim(ClaimTypes.Name, user.UserName ?? string.Empty),
+                new Claim(identityOptions.ClaimsIdentity.SecurityStampClaimType,
+                    user.SecurityStamp ?? throw new InvalidOperationException("Test user has no Security Stamp."))
+            ],
             scheme);
         var ticket = new AuthenticationTicket(
             new ClaimsPrincipal(identity),

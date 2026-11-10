@@ -4,6 +4,7 @@ using System.Security.Claims;
 using Chat.Application.Interfaces;
 using Chat.Application.Services;
 using Chat.Infrastructure.Data;
+using Chat.Infrastructure.Identity;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Identity;
@@ -42,17 +43,30 @@ public class BlocksApiTests
         {
             services.RemoveAll<IBlockService>();
             services.AddScoped<IBlockService>(_ => fake);
+            services.RemoveAll<IUserStore<ApplicationUser>>();
+            services.AddSingleton<IUserStore<ApplicationUser>, TestIdentityUserStore>();
         }));
 
     private static void Authenticate(WebApplicationFactory<Program> factory, HttpClient client)
     {
-        // Use the real CHAT-2 cookie scheme and ticket protection, without a DB login.
+        // Use a protected Identity cookie with a test user and matching Security Stamp.
+        var store = (TestIdentityUserStore)factory.Services.GetRequiredService<IUserStore<ApplicationUser>>();
+        var user = store.EnsureUser(Caller);
+        var identityOptions = factory.Services.GetRequiredService<IOptions<IdentityOptions>>().Value;
         var options = factory.Services.GetRequiredService<IOptionsMonitor<CookieAuthenticationOptions>>()
             .Get(IdentityConstants.ApplicationScheme);
-        var identity = new ClaimsIdentity(new[] { new Claim(ClaimTypes.NameIdentifier, Caller.ToString()) }, IdentityConstants.ApplicationScheme);
+        var identity = new ClaimsIdentity(
+            new[]
+            {
+                new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
+                new Claim(ClaimTypes.Name, user.UserName!),
+                new Claim(identityOptions.ClaimsIdentity.SecurityStampClaimType, user.SecurityStamp!)
+            },
+            IdentityConstants.ApplicationScheme);
         var ticket = new AuthenticationTicket(new ClaimsPrincipal(identity), new AuthenticationProperties
         {
-            IssuedUtc = DateTimeOffset.UtcNow, ExpiresUtc = DateTimeOffset.UtcNow.AddMinutes(5)
+            IssuedUtc = DateTimeOffset.UtcNow,
+            ExpiresUtc = DateTimeOffset.UtcNow.AddMinutes(5)
         }, IdentityConstants.ApplicationScheme);
         client.DefaultRequestHeaders.Add("Cookie", $"{options.Cookie.Name}={options.TicketDataFormat.Protect(ticket)}");
     }

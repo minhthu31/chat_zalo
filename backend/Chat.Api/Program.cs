@@ -37,7 +37,8 @@ builder.Services.AddIdentityCore<ApplicationUser>(options =>
 
 builder.Services.Configure<SecurityStampValidatorOptions>(options =>
 {
-    // Immediate revocation is required by CHAT-13 after a password change.
+    // CHAT-13: validate the Identity Security Stamp on every authenticated request
+    // so cookies issued before a password change are rejected on their next request.
     options.ValidationInterval = TimeSpan.Zero;
 });
 

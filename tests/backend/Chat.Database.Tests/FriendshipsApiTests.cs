@@ -4,6 +4,7 @@ using System.Security.Claims;
 using Chat.Application.DTOs.Friendships;
 using Chat.Application.Interfaces;
 using Chat.Application.Services;
+using Chat.Infrastructure.Identity;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Identity;
@@ -117,15 +118,24 @@ public sealed class FriendshipsApiTests
             {
                 services.RemoveAll<IFriendshipService>();
                 services.AddScoped<IFriendshipService>(_ => fake);
+                services.RemoveAll<IUserStore<ApplicationUser>>();
+                services.AddSingleton<IUserStore<ApplicationUser>, TestIdentityUserStore>();
             }));
 
     private static void Authenticate(WebApplicationFactory<Program> factory, HttpClient client)
     {
-        // Issue a real, protected Identity.Application cookie ticket with a test principal.
+        // Issue a protected Identity cookie with a real test user and matching Security Stamp.
+        var store = (TestIdentityUserStore)factory.Services.GetRequiredService<IUserStore<ApplicationUser>>();
+        var user = store.EnsureUser(Caller);
+        var identityOptions = factory.Services.GetRequiredService<IOptions<IdentityOptions>>().Value;
         var options = factory.Services.GetRequiredService<IOptionsMonitor<CookieAuthenticationOptions>>()
             .Get(IdentityConstants.ApplicationScheme);
         var identity = new ClaimsIdentity(
-            [new Claim(ClaimTypes.NameIdentifier, Caller.ToString())],
+            [
+                new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
+                new Claim(ClaimTypes.Name, user.UserName!),
+                new Claim(identityOptions.ClaimsIdentity.SecurityStampClaimType, user.SecurityStamp!)
+            ],
             IdentityConstants.ApplicationScheme);
         var ticket = new AuthenticationTicket(new ClaimsPrincipal(identity), new AuthenticationProperties
         {

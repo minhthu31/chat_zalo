@@ -103,7 +103,7 @@ public sealed class AuthController : ControllerBase
         return NoContent();
     }
 
-    // 204 khi đổi mật khẩu thành công. Giữ session hiện tại và vô hiệu hóa session cũ qua Security Stamp.
+    // 204 khi đổi mật khẩu thành công. Đăng xuất phiên hiện tại; Security Stamp vô hiệu hóa các phiên cũ khác.
     [HttpPost("change-password")]
     public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordRequest? request)
     {
@@ -117,6 +117,7 @@ public sealed class AuthController : ControllerBase
         try
         {
             await _auth.ChangePasswordAsync(appUser.Id, request!);
+            await _signInManager.SignOutAsync();
             return NoContent();
         }
         catch (AuthException ex)
@@ -159,14 +160,10 @@ public sealed class AuthController : ControllerBase
 internal sealed class IdentityAccountGateway : IAccountGateway
 {
     private readonly UserManager<ApplicationUser> _users;
-    private readonly SignInManager<ApplicationUser> _signInManager;
 
-    public IdentityAccountGateway(
-        UserManager<ApplicationUser> users,
-        SignInManager<ApplicationUser> signInManager)
+    public IdentityAccountGateway(UserManager<ApplicationUser> users)
     {
         _users = users;
-        _signInManager = signInManager;
     }
 
     public async Task<AccountCreateResult> CreateAsync(string userName, string email, string password, string displayName)
@@ -271,10 +268,9 @@ internal sealed class IdentityAccountGateway : IAccountGateway
                 string.Join(" ", result.Errors.Select(error => error.Description)));
         }
 
-        // Identity đã cập nhật Security Stamp. RefreshSignInAsync cấp cookie mới
-        // cho request hiện tại để thiết bị này tiếp tục đăng nhập.
-        await _signInManager.RefreshSignInAsync(user);
-
+        // UserManager.ChangePasswordAsync updates the Security Stamp.
+        // The controller signs out the current cookie; other cookies carrying
+        // the previous stamp are rejected by SecurityStampValidator.
         return new ChangePasswordResult(ChangePasswordStatus.Success);
     }
 
