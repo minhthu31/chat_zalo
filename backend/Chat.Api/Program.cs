@@ -13,6 +13,9 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.HttpOverrides;
+using System.Net;
 
 var builder = WebApplication.CreateBuilder(args);
 var configuration = builder.Configuration;
@@ -26,6 +29,17 @@ builder.Services.AddDbContext<ChatDbContext>(options =>
     options.UseNpgsql(connectionString));
 
 builder.Services.AddDataProtection();
+var keyPath = configuration["DataProtection:KeyPath"];
+if (!string.IsNullOrWhiteSpace(keyPath))
+    builder.Services.AddDataProtection().PersistKeysToFileSystem(new DirectoryInfo(keyPath));
+
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    // Only explicitly configured proxies may supply the original HTTPS scheme.
+    foreach (var address in configuration.GetSection("ReverseProxy:KnownProxies").Get<string[]>() ?? [])
+        options.KnownProxies.Add(IPAddress.Parse(address));
+});
 
 builder.Services.AddIdentityCore<ApplicationUser>(options =>
 {
@@ -190,6 +204,7 @@ builder.Services.AddScoped<IConversationEventPublisher>(services =>
     services.GetRequiredService<ChatNotificationService>());
 
 var app = builder.Build();
+app.UseForwardedHeaders();
 
 // Middleware order: CORS -> Authentication -> Authorization
 app.UseCors("Frontend");

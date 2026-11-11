@@ -1,0 +1,76 @@
+name: chat23
+services:
+  db:
+    image: postgres:18
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: chat_zalo
+      POSTGRES_USER: chat_zalo
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in deploy/.env}
+    volumes:
+      - postgres:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chat_zalo -d chat_zalo"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [private]
+  migrate:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: migrate
+    environment:
+      ConnectionStrings__ChatDb: Host=db;Database=chat_zalo;Username=chat_zalo;Password=${POSTGRES_PASSWORD};GSS Encryption Mode=Disable
+      ConnectionStrings__DefaultConnection: Host=db;Database=chat_zalo;Username=chat_zalo;Password=${POSTGRES_PASSWORD};GSS Encryption Mode=Disable
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [private]
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: api
+    restart: unless-stopped
+    environment:
+      ConnectionStrings__ChatDb: Host=db;Database=chat_zalo;Username=chat_zalo;Password=${POSTGRES_PASSWORD};GSS Encryption Mode=Disable
+      ConnectionStrings__DefaultConnection: Host=db;Database=chat_zalo;Username=chat_zalo;Password=${POSTGRES_PASSWORD};GSS Encryption Mode=Disable
+      AllowedHosts: ${CHAT_DOMAIN:?Set CHAT_DOMAIN to your public hostname}
+      DataProtection__KeyPath: /app/keys
+      ReverseProxy__KnownProxies__0: ${CHAT_PROXY_IP:-172.30.23.10}
+    volumes:
+      - keys:/app/keys
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    networks: [private]
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: web
+    restart: unless-stopped
+    environment:
+      CHAT_DOMAIN: ${CHAT_DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [api]
+    networks:
+      private:
+        ipv4_address: ${CHAT_PROXY_IP:-172.30.23.10}
+networks:
+  private:
+    ipam:
+      config:
+        - subnet: ${CHAT_SUBNET:-172.30.23.0/24}
+volumes:
+  postgres:
+  keys:
+  caddy_data:
+  caddy_config:

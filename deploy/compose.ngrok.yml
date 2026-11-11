@@ -1,0 +1,16 @@
+# Fixed free domain assigned to the user's ngrok account.
+# Share web's network so HTTPS upstream uses localhost SNI.
+services:
+  ngrok:
+    image: ngrok/ngrok:latest
+    restart: unless-stopped
+    network_mode: service:web
+    env_file:
+      - .env.ngrok
+    command:
+      - http
+      - https://localhost:443
+      - --host-header=localhost
+      - --log=stdout
+      - --log-format=json
+    depends_on: [web]

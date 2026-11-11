@@ -1,4 +1,25 @@
 @page "/"
+@using global::Chat.Client.Services
+@using global::Chat.Client.State
+@inject AuthState Auth
+@inject NavigationManager Nav
 
-<h1>chat_zalo</h1>
-<p>Khung Blazor WebAssembly. Chưa triển khai nghiệp vụ.</p>
+<div class="as-root auth-center">
+    <p role="status">Đang mở ứng dụng…</p>
+</div>
+
+@code {
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            await Auth.InitializeAsync();
+            Nav.NavigateTo(Auth.IsAuthenticated ? "/chat" : "/login", replace: true);
+        }
+        catch (ApiException)
+        {
+            // The login screen already handles API/network errors for the user.
+            Nav.NavigateTo("/login", replace: true);
+        }
+    }
+}

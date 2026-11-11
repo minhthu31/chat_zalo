@@ -1,0 +1,53 @@
+name: Deployment CI
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'deploy/**'
+      - 'backend/**'
+      - 'frontend/**'
+      - '.dockerignore'
+      - '.github/workflows/deployment-ci.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/**'
+      - 'backend/**'
+      - 'frontend/**'
+      - '.dockerignore'
+      - '.github/workflows/deployment-ci.yml'
+jobs:
+  deployed-stack:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Configure isolated deployment
+        run: |
+          python - <<'PY'
+          import pathlib, secrets
+          pathlib.Path('deploy/.env').write_text('CHAT_DOMAIN=localhost\nPOSTGRES_PASSWORD=' + secrets.token_hex(32) + '\n')
+          PY
+          pip install -r deploy/requirements-smoke.txt
+      - name: Validate optional demo configuration without publishing a tunnel in CI
+        run: docker compose --env-file deploy/.env -f deploy/compose.yml -f deploy/compose.demo.yml config --quiet
+      - name: Build and start real deployment
+        run: docker compose --env-file deploy/.env -f deploy/compose.yml up -d --build
+      - name: Wait for HTTPS
+        run: |
+          for i in $(seq 1 30); do
+            if curl --fail --silent --insecure https://localhost/health; then exit 0; fi
+            sleep 2
+          done
+          exit 1
+      - name: Verify independent clients through HTTPS and WebSocket
+        run: python deploy/smoke.py https://localhost --insecure-localhost --restart-api
+      - name: Deployment logs
+        if: failure()
+        run: docker compose --env-file deploy/.env -f deploy/compose.yml logs --no-color
+      - name: Stop CI deployment
+        if: always()
+        run: docker compose --env-file deploy/.env -f deploy/compose.yml down
