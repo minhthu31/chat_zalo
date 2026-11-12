@@ -1,4 +1,5 @@
 using Chat.Api.Controllers;
+using Chat.Api.Authorization;
 using Chat.Application.DTOs.Auth;
 using Chat.Application.Interfaces;
 using Chat.Application.Services;
@@ -189,7 +190,8 @@ builder.Services.AddScoped<IChatNotificationService>(services =>
 builder.Services.AddScoped<IConversationEventPublisher>(services =>
     services.GetRequiredService<ChatNotificationService>());
 
-var app = builder.Build();
+   builder.Services.AddGroupPermissions();
+   var app = builder.Build();
 
 // Middleware order: CORS -> Authentication -> Authorization
 app.UseCors("Frontend");
