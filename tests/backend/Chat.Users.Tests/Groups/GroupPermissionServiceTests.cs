@@ -243,7 +243,36 @@ public class GroupPermissionServiceTests
         Assert.False((await _sut.CanDisbandGroupAsync(G, Admin)).Allowed);
     }
 
-    // ---------- Fakes (thread-safe) ----------
+        // ---------- Ánh xạ mã lỗi theo API_CONTRACT ----------
+
+    [Fact]
+    public async Task ErrorCodes_AndHttpStatus_MatchContract()
+    {
+        var outsider = await _sut.CanSendMessageAsync(G, Outsider);
+        Assert.Equal("GROUP_ACCESS_DENIED", outsider.ErrorCode);
+        Assert.Equal(403, outsider.HttpStatus);
+
+        var member = await _sut.CanDisbandGroupAsync(G, Member);
+        Assert.Equal("GROUP_ACCESS_DENIED", member.ErrorCode);
+        Assert.Equal(403, member.HttpStatus);
+
+        var notFriend = await _sut.CanAddMemberAsync(G, Member, Outsider);
+        Assert.Equal("NOT_FRIEND", notFriend.ErrorCode);
+        Assert.Equal(403, notFriend.HttpStatus);
+
+        _friends.Add(Member, Member2);
+        var dup = await _sut.CanAddMemberAsync(G, Member, Member2);
+        Assert.Equal("ALREADY_GROUP_MEMBER", dup.ErrorCode);
+        Assert.Equal(409, dup.HttpStatus);
+
+        var missing = await _sut.CanRemoveMemberAsync(G, Admin, Outsider);
+        Assert.Equal("NOT_FOUND", missing.ErrorCode);
+        Assert.Equal(404, missing.HttpStatus);
+
+        var self = await _sut.CanRemoveMemberAsync(G, Admin, Admin);
+        Assert.Equal("VALIDATION_ERROR", self.ErrorCode);
+        Assert.Equal(400, self.HttpStatus);
+    }// ---------- Fakes (thread-safe) ----------
 
     private sealed class FakeMembershipQuery : IGroupMembershipQuery
     {
