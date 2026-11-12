@@ -68,15 +68,17 @@ public sealed class MessageServiceTests
         }
     }
 
-    private static MessageService CreateService(
-    ChatDbContext db,
-    IConversationEventPublisher? publisher = null) =>
-    new(
-        db,
-        new BlockService(db),
-        publisher ?? NullPublisher.Instance,
-        NullLogger<MessageService>.Instance);
-
+        private static MessageService CreateService(
+        ChatDbContext db,
+        IConversationEventPublisher? publisher = null) =>
+        new(
+            db,
+            new BlockService(db),
+            new Chat.Application.Services.GroupPermissionService(
+                new Chat.Infrastructure.Repositories.GroupMembershipQuery(db),
+                new Chat.Infrastructure.Services.FriendshipService(db)),
+            publisher ?? NullPublisher.Instance,
+            NullLogger<MessageService>.Instance);
     private static ChatDbContext CreateContext(
         SaveChangesInterceptor? interceptor = null)
     {

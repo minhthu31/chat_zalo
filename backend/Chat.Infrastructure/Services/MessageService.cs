@@ -1,6 +1,7 @@
 ﻿using System.Data;
 using Chat.Application.DTOs.Messages;
 using Chat.Application.Interfaces;
+using Chat.Application.Models.Groups;
 using Chat.Application.Services;
 using Chat.Domain.Entities;
 using Chat.Infrastructure.Data;
@@ -13,17 +14,20 @@ public sealed class MessageService : IMessageService
 {
     private readonly ChatDbContext _db;
     private readonly IBlockService _blockService;
+    private readonly IGroupPermissionService _groupPermissions;
     private readonly IConversationEventPublisher _eventPublisher;
     private readonly ILogger<MessageService> _logger;
 
     public MessageService(
         ChatDbContext db,
         IBlockService blockService,
+        IGroupPermissionService groupPermissions,
         IConversationEventPublisher eventPublisher,
         ILogger<MessageService> logger)
     {
         _db = db;
         _blockService = blockService;
+        _groupPermissions = groupPermissions;
         _eventPublisher = eventPublisher;
         _logger = logger;
     }
@@ -268,7 +272,24 @@ public sealed class MessageService : IMessageService
         Conversation conversation,
         bool forSending)
     {
-        // Thành viên đang hoạt động mới được truy cập.
+        // Nhóm: dùng dịch vụ phân quyền chung (S2-09).
+        // Từ chối người không thuộc nhóm, đã rời/bị xóa và nhóm đã giải tán.
+        // Nhóm không áp dụng quy tắc chặn của chat 1-1 (CHAT-16).
+        if (conversation.Kind == "Group")
+        {
+            var access = forSending
+                ? await _groupPermissions.CanSendMessageAsync(conversation.Id, currentUserId)
+                : await _groupPermissions.CanViewMessagesAsync(conversation.Id, currentUserId);
+
+            if (!access.Allowed)
+            {
+                throw ToException(access);
+            }
+
+            return;
+        }
+
+        // Chat 1-1: thành viên đang hoạt động mới được truy cập.
         var isMember = await _db.ConversationMembers
             .AsNoTracking()
             .AnyAsync(m =>
@@ -279,26 +300,6 @@ public sealed class MessageService : IMessageService
         if (!isMember)
         {
             throw AccessDenied();
-        }
-
-        // CHAT-16: nhóm không áp dụng quy tắc chặn của chat 1-1.
-        if (conversation.Kind == "Group")
-        {
-            if (forSending)
-            {
-                var groupIsActive = await _db.GroupConversations
-                    .AsNoTracking()
-                    .AnyAsync(g =>
-                        g.ConversationId == conversation.Id &&
-                        g.DeletedAt == null);
-
-                if (!groupIsActive)
-                {
-                    throw AccessDenied();
-                }
-            }
-
-            return;
         }
 
         if (conversation.Kind != "Direct")
@@ -376,7 +377,29 @@ public sealed class MessageService : IMessageService
                 m.ConversationId == conversationId &&
                 m.LeftAt == null);
 
-        return member ?? throw AccessDenied();
+        if (member is not null)
+        {
+            return member;
+        }
+
+        // Không phải thành viên đang hoạt động: nhóm trả mã lỗi của nhóm,
+        // các trường hợp khác giữ nguyên hành vi cũ.
+        var kind = await _db.Conversations
+            .AsNoTracking()
+            .Where(c => c.Id == conversationId)
+            .Select(c => c.Kind)
+            .FirstOrDefaultAsync();
+
+        if (kind == "Group")
+        {
+            var access = await _groupPermissions.GetAccessAsync(conversationId, userId);
+            if (!access.Allowed)
+            {
+                throw ToException(access);
+            }
+        }
+
+        throw AccessDenied();
     }
 
     private async Task<Conversation> GetConversationAsync(
@@ -431,6 +454,15 @@ public sealed class MessageService : IMessageService
             403,
             "CONVERSATION_ACCESS_DENIED",
             "Bạn không có quyền thực hiện thao tác trong hội thoại này.");
+    }
+
+    // Đổi kết quả phân quyền nhóm thành lỗi đúng hợp đồng API (mã lỗi + HTTP status).
+    private static MessageServiceException ToException(PermissionResult result)
+    {
+        return new MessageServiceException(
+            result.HttpStatus ?? 403,
+            result.ErrorCode ?? "GROUP_ACCESS_DENIED",
+            result.Message ?? "Bạn không có quyền truy cập nhóm này.");
     }
 
     private static MessageResponse ToResponse(
