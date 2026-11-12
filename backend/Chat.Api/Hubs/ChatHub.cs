@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
+using Chat.Application.Interfaces;
 using Chat.Infrastructure.Data;
 
 namespace chat_zalo.Hubs
@@ -11,11 +12,16 @@ namespace chat_zalo.Hubs
     {
         private readonly ChatDbContext _dbContext;
         private readonly IChatConnectionTracker _tracker;
+        private readonly IGroupPermissionService _groupPermissions;
 
-        public ChatHub(ChatDbContext dbContext, IChatConnectionTracker tracker)
+        public ChatHub(
+            ChatDbContext dbContext,
+            IChatConnectionTracker tracker,
+            IGroupPermissionService groupPermissions)
         {
             _dbContext = dbContext;
             _tracker = tracker;
+            _groupPermissions = groupPermissions;
         }
 
         public async Task JoinConversation(string conversationIdStr)
@@ -33,21 +39,42 @@ namespace chat_zalo.Hubs
                 throw new HubException("Unauthorized user.");
             }
 
-            var isMember = await _dbContext.ConversationMembers
-                .AnyAsync(cm => cm.ConversationId == conversationId
-                             && cm.UserId == userId
-                             && cm.LeftAt == null);
+            var kind = await _dbContext.Conversations
+                .AsNoTracking()
+                .Where(c => c.Id == conversationId)
+                .Select(c => c.Kind)
+                .FirstOrDefaultAsync();
 
-            if (!isMember)
+            if (kind == "Group")
             {
-                throw new HubException("You are not a member of this conversation.");
+                // Nhóm: dùng dịch vụ phân quyền chung (S2-09).
+                // Từ chối khi không còn là thành viên đang hoạt động hoặc nhóm đã giải tán.
+                // Blocks không áp dụng cho việc Join nhóm; Blocks trong nhóm chỉ lọc tin nhắn.
+                var permission = await _groupPermissions.CanJoinRealtimeAsync(conversationId, userId);
+                if (!permission.Allowed)
+                {
+                    throw new HubException(permission.ErrorCode!);
+                }
             }
+            else
+            {
+                // Chat 1-1: giữ nguyên quy tắc cũ.
+                var isMember = await _dbContext.ConversationMembers
+                    .AnyAsync(cm => cm.ConversationId == conversationId
+                                 && cm.UserId == userId
+                                 && cm.LeftAt == null);
 
-            var blocked = await _dbContext.UserBlocks.AsNoTracking().AnyAsync(b =>
-                b.BlockedUserId == userId && _dbContext.ConversationMembers.Any(peer =>
-                    peer.ConversationId == conversationId && peer.UserId == b.BlockerUserId));
-            if (blocked)
-                throw new HubException("Conversation access denied.");
+                if (!isMember)
+                {
+                    throw new HubException("You are not a member of this conversation.");
+                }
+
+                var blocked = await _dbContext.UserBlocks.AsNoTracking().AnyAsync(b =>
+                    b.BlockedUserId == userId && _dbContext.ConversationMembers.Any(peer =>
+                        peer.ConversationId == conversationId && peer.UserId == b.BlockerUserId));
+                if (blocked)
+                    throw new HubException("Conversation access denied.");
+            }
 
             string groupName = conversationId.ToString("D");
 
