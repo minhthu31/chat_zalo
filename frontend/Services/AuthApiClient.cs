@@ -29,6 +29,13 @@ public class AuthApiClient : IAuthApiClient
         _api.ResetCsrfToken();
     }
 
+    // 204: đổi xong thì backend vô hiệu hóa cookie cũ, nên phải đăng nhập lại
+    public async Task ChangePasswordAsync(ChangePasswordRequest request)
+    {
+        await _api.SendAsync(HttpMethod.Post, "api/auth/change-password", request);
+        _api.ResetCsrfToken(); // phiên đã đổi nên token cũ không còn đúng
+    }
+
     public async Task<UserResponse?> GetMeAsync()
     {
         try

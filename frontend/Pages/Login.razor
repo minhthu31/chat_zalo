@@ -13,6 +13,11 @@
         <div class="card">
             <h1 class="page-title">Đăng nhập</h1>
 
+            @if (Changed)
+            {
+                <p class="alert alert-success">Đổi mật khẩu thành công. Vui lòng đăng nhập lại bằng mật khẩu mới.</p>
+            }
+
             <LoginForm OnSuccess="GoHome" />
 
             <p class="muted center">Chưa có tài khoản? <a href="register">Đăng ký</a></p>
@@ -21,5 +26,10 @@
 </div>
 
 @code {
+    // Trang đổi mật khẩu chuyển sang đây bằng /login?changed=true để hiện dòng thông báo thành công
+    [Parameter]
+    [SupplyParameterFromQuery]
+    public bool Changed { get; set; }
+
     private void GoHome() => Nav.NavigateTo("/chat");
 }

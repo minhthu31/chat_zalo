@@ -13,6 +13,13 @@ public class LoginRequest
     public string Password { get; set; } = "";
 }
 
+// Body của POST /api/auth/change-password (hợp đồng Sprint 2, mục 9)
+public class ChangePasswordRequest
+{
+    public string CurrentPassword { get; set; } = "";
+    public string NewPassword { get; set; } = "";
+}
+
 public class UserResponse
 {
     public Guid Id { get; set; }
