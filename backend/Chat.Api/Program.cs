@@ -153,6 +153,7 @@ builder.Services.AddScoped<IAccountGateway, IdentityAccountGateway>();
 builder.Services.AddScoped<IUserService, UserService>();
 builder.Services.AddScoped<IUserAccountGateway, IdentityUserAccountGateway>();
 builder.Services.AddScoped<IMessageService, Chat.Infrastructure.Services.MessageService>();
+builder.Services.AddScoped<IGroupService, Chat.Infrastructure.Services.GroupService>();
 
 builder.Services.AddControllers();
 
