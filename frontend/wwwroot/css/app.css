@@ -357,10 +357,32 @@
         box-shadow: 0 8px 20px rgba(0, 104, 255, 0.28);
     }
 
+    /* ----- Nút Trước / Sau của danh sách tìm kiếm ----- */
+    .pager {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.75rem;
+        margin-top: 1rem;
+        font-size: 0.9rem;
+    }
+
     .actions {
         display: flex;
+        flex-wrap: wrap;
         flex-shrink: 0;
+        align-items: center;
+        justify-content: flex-end;
         gap: 0.4rem;
+    }
+
+    .badge-blocked {
+        padding: 0.15rem 0.55rem;
+        border-radius: 999px;
+        background: var(--danger-soft);
+        color: var(--danger);
+        font-size: 0.78rem;
+        font-weight: 600;
     }
 
     .profile-username {

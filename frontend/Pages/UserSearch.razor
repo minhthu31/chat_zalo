@@ -70,6 +70,27 @@
                     </span>
                 </div>
             }
+
+            @if (_searched && _totalPages > 1)
+            {
+                <div class="pager">
+                    <button type="button"
+                            class="btn btn-sm"
+                            disabled="@(_searching || _page <= 1)"
+                            @onclick="() => GoToPageAsync(_page - 1)">
+                        Trước
+                    </button>
+
+                    <span class="muted">Trang @_page / @_totalPages · @_totalCount người</span>
+
+                    <button type="button"
+                            class="btn btn-sm"
+                            disabled="@(_searching || _page >= _totalPages)"
+                            @onclick="() => GoToPageAsync(_page + 1)">
+                        Sau
+                    </button>
+                </div>
+            }
         </div>
 
         <FriendshipPanel @ref="_panel"
@@ -80,7 +101,13 @@
 @code {
     private FriendshipPanel? _panel;
 
+    private const int PageSize = 10;
+
     private string _query = "";
+    private string _searchedQuery = "";   // từ khóa của lần tìm gần nhất, dùng khi bấm Trước/Sau
+    private int _page = 1;
+    private int _totalPages;
+    private int _totalCount;
     private List<UserDto> _results = new();
 
     private readonly HashSet<Guid> _sent = new();
@@ -152,7 +179,19 @@
         await RefreshFriendshipStateAsync();
     }
 
-    private async Task SearchAsync()
+    // Bấm "Tìm" hoặc Enter: luôn bắt đầu lại từ trang 1 với từ khóa mới
+    private Task SearchAsync() => LoadPageAsync(_query.Trim(), 1);
+
+    // Bấm "Trước" / "Sau": giữ nguyên từ khóa của lần tìm gần nhất, chỉ đổi trang
+    private Task GoToPageAsync(int page)
+    {
+        if (page < 1 || page > _totalPages)
+            return Task.CompletedTask;
+
+        return LoadPageAsync(_searchedQuery, page);
+    }
+
+    private async Task LoadPageAsync(string query, int page)
     {
         if (_searching)
             return;
@@ -163,7 +202,13 @@
 
         try
         {
-            _results = await UserApi.SearchAsync(_query.Trim());
+            var result = await UserApi.SearchPagedAsync(query, page, PageSize);
+
+            _results = result.Items;
+            _page = result.Page;
+            _totalPages = result.TotalPages;
+            _totalCount = result.TotalCount;
+            _searchedQuery = query;
             _searched = true;
 
             await RefreshFriendshipStateAsync();
@@ -172,6 +217,9 @@
         {
             _results = new();
             _searched = false;
+            _page = 1;
+            _totalPages = 0;
+            _totalCount = 0;
 
             _error = ex.Code switch
             {
@@ -179,6 +227,8 @@
                     "Vui lòng nhập tên đăng nhập cần tìm.",
                 "INVALID_USERNAME" =>
                     "Tên đăng nhập quá dài (tối đa 100 ký tự).",
+                "INVALID_PAGE" or "INVALID_PAGE_SIZE" =>
+                    "Trang yêu cầu không hợp lệ, vui lòng tìm lại.",
                 _ => FriendshipErrors.ToMessage(ex.Code)
             };
         }
