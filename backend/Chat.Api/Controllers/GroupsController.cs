@@ -15,10 +15,12 @@ namespace Chat.Api.Controllers;
 public class GroupsController : ControllerBase
 {
     private readonly IGroupService _groupService;
+    private readonly ILogger<GroupsController> _logger;
 
-    public GroupsController(IGroupService groupService)
+    public GroupsController(IGroupService groupService, ILogger<GroupsController> logger)
     {
         _groupService = groupService;
+        _logger = logger;
     }
 
     private Guid? ResolveCurrentUserId()
@@ -39,8 +41,18 @@ public class GroupsController : ControllerBase
             KeyNotFoundException kex => NotFound(new { code = "NOT_FOUND", message = kex.Message }),
             ArgumentException aex => BadRequest(new { code = "VALIDATION_ERROR", message = aex.Message }),
             UnauthorizedAccessException uex => StatusCode(StatusCodes.Status403Forbidden, new { code = "GROUP_ACCESS_DENIED", message = uex.Message }),
-            _ => StatusCode(StatusCodes.Status500InternalServerError, new { code = "INTERNAL_ERROR", message = ex.Message })
+            _ => HandleUnhandledException(ex)
         };
+    }
+
+    private IActionResult HandleUnhandledException(Exception ex)
+    {
+        _logger.LogError(ex, "Lỗi xử lý API quản lý nhóm");
+        return StatusCode(StatusCodes.Status500InternalServerError, new
+        {
+            code = "INTERNAL_ERROR",
+            message = "Đã xảy ra lỗi hệ thống, vui lòng thử lại sau."
+        });
     }
 
     // 1. Tạo nhóm (Create Group)

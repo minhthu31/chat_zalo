@@ -3,7 +3,9 @@ namespace Chat.Application.Tests;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Claims;
 using System.Threading.Tasks;
+using Chat.Api.Controllers;
 using Chat.Application.DTOs.Friendships;
 using Chat.Application.DTOs.Groups;
 using Chat.Application.Interfaces;
@@ -14,7 +16,10 @@ using Chat.Infrastructure.Data;
 using Chat.Infrastructure.Identity;
 using Chat.Infrastructure.Repositories;
 using Chat.Infrastructure.Services;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Xunit;
 
 public class GroupServiceTests
@@ -148,6 +153,55 @@ public class GroupServiceTests
         };
 
         var ex = await Assert.ThrowsAsync<GroupServiceException>(() => service.CreateGroupAsync(Guid.NewGuid(), request));
+        Assert.Equal(400, ex.StatusCode);
+        Assert.Equal("VALIDATION_ERROR", ex.Code);
+    }
+
+    [Fact]
+    public async Task CreateGroupAsync_DuplicateMemberIds_ThrowsValidationException()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var (service, friendships, db) = CreateService(dbName);
+
+        var admin = MakeUser("admin");
+        var member1 = MakeUser("m1");
+        db.Users.AddRange(admin, member1);
+        await db.SaveChangesAsync();
+
+        friendships.AddFriendship(admin.Id, member1.Id);
+
+        var request = new CreateGroupRequest
+        {
+            Name = "Group with duplicate member",
+            MemberIds = new List<Guid> { member1.Id, member1.Id }
+        };
+
+        var ex = await Assert.ThrowsAsync<GroupServiceException>(() => service.CreateGroupAsync(admin.Id, request));
+        Assert.Equal(400, ex.StatusCode);
+        Assert.Equal("VALIDATION_ERROR", ex.Code);
+        Assert.Equal("Danh sách thành viên không được chứa ID trùng lặp.", ex.Message);
+    }
+
+    [Fact]
+    public async Task CreateGroupAsync_SelfInMemberIds_ThrowsValidationException()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var (service, friendships, db) = CreateService(dbName);
+
+        var admin = MakeUser("admin");
+        var member1 = MakeUser("m1");
+        db.Users.AddRange(admin, member1);
+        await db.SaveChangesAsync();
+
+        friendships.AddFriendship(admin.Id, member1.Id);
+
+        var request = new CreateGroupRequest
+        {
+            Name = "Group with self",
+            MemberIds = new List<Guid> { member1.Id, admin.Id }
+        };
+
+        var ex = await Assert.ThrowsAsync<GroupServiceException>(() => service.CreateGroupAsync(admin.Id, request));
         Assert.Equal(400, ex.StatusCode);
         Assert.Equal("VALIDATION_ERROR", ex.Code);
     }
@@ -527,5 +581,82 @@ public class GroupServiceTests
         // Group is no longer accessible
         var ex = await Assert.ThrowsAsync<GroupServiceException>(() => service.GetGroupAsync(admin.Id, groupDto.Id));
         Assert.Equal(403, ex.StatusCode);
+    }
+
+    // =======================================================================
+    // 8. Controller: Xử lý Exception và Ghi Log (Lỗi 500)
+    // =======================================================================
+
+    [Fact]
+    public async Task GroupsController_UnhandledException_LogsExactMessageAndReturns500InternalError()
+    {
+        var failingService = new FailingGroupService();
+        var logger = new TestLogger<GroupsController>();
+        var controller = new GroupsController(failingService, logger);
+
+        var userId = Guid.NewGuid();
+        var user = new ClaimsPrincipal(new ClaimsIdentity(new[]
+        {
+            new Claim(ClaimTypes.NameIdentifier, userId.ToString())
+        }, "TestAuth"));
+
+        controller.ControllerContext = new ControllerContext
+        {
+            HttpContext = new DefaultHttpContext { User = user }
+        };
+
+        var result = await controller.GetGroup(Guid.NewGuid());
+        var objectResult = Assert.IsType<ObjectResult>(result);
+        Assert.Equal(500, objectResult.StatusCode);
+
+        var value = objectResult.Value;
+        Assert.NotNull(value);
+        var codeProp = value.GetType().GetProperty("code")?.GetValue(value)?.ToString();
+        var msgProp = value.GetType().GetProperty("message")?.GetValue(value)?.ToString();
+
+        Assert.Equal("INTERNAL_ERROR", codeProp);
+        Assert.Equal("Đã xảy ra lỗi hệ thống, vui lòng thử lại sau.", msgProp);
+
+        Assert.Single(logger.Logs);
+        Assert.Equal(LogLevel.Error, logger.Logs[0].Level);
+        Assert.Equal("Lỗi xử lý API quản lý nhóm", logger.Logs[0].Message);
+        Assert.NotNull(logger.Logs[0].Exception);
+    }
+
+    private class FailingGroupService : IGroupService
+    {
+        public Task<GroupDto> CreateGroupAsync(Guid currentUserId, CreateGroupRequest request, CancellationToken ct = default)
+            => throw new InvalidOperationException("Sensitive internal error message");
+        public Task<GroupDto> GetGroupAsync(Guid currentUserId, Guid groupId, CancellationToken ct = default)
+            => throw new InvalidOperationException("Sensitive internal error message");
+        public Task<List<GroupMemberDto>> GetMembersAsync(Guid currentUserId, Guid groupId, CancellationToken ct = default)
+            => throw new InvalidOperationException("Sensitive internal error message");
+        public Task<GroupMemberDto> AddMemberAsync(Guid currentUserId, Guid groupId, Guid targetUserId, CancellationToken ct = default)
+            => throw new InvalidOperationException("Sensitive internal error message");
+        public Task RemoveMemberAsync(Guid currentUserId, Guid groupId, Guid targetUserId, CancellationToken ct = default)
+            => throw new InvalidOperationException("Sensitive internal error message");
+        public Task<AdminTransferDto> ProposeAdminTransferAsync(Guid currentUserId, Guid groupId, Guid targetUserId, CancellationToken ct = default)
+            => throw new InvalidOperationException("Sensitive internal error message");
+        public Task AcceptAdminTransferAsync(Guid currentUserId, Guid groupId, Guid requestId, CancellationToken ct = default)
+            => throw new InvalidOperationException("Sensitive internal error message");
+        public Task RejectAdminTransferAsync(Guid currentUserId, Guid groupId, Guid requestId, CancellationToken ct = default)
+            => throw new InvalidOperationException("Sensitive internal error message");
+        public Task LeaveGroupAsync(Guid currentUserId, Guid groupId, CancellationToken ct = default)
+            => throw new InvalidOperationException("Sensitive internal error message");
+        public Task DisbandGroupAsync(Guid currentUserId, Guid groupId, CancellationToken ct = default)
+            => throw new InvalidOperationException("Sensitive internal error message");
+    }
+
+    private class TestLogger<T> : ILogger<T>
+    {
+        public List<(LogLevel Level, Exception? Exception, string Message)> Logs { get; } = new();
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            Logs.Add((logLevel, exception, formatter(state, exception)));
+        }
     }
 }

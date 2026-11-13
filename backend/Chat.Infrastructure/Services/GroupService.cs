@@ -36,18 +36,23 @@ public class GroupService : IGroupService
             throw new GroupServiceException(400, "VALIDATION_ERROR", "Nhóm phải có ít nhất một thành viên ban đầu.");
         }
 
-        var distinctMemberIds = request.MemberIds
-            .Where(id => id != currentUserId && id != Guid.Empty)
-            .Distinct()
-            .ToList();
-
-        if (distinctMemberIds.Count == 0)
+        if (request.MemberIds.Distinct().Count() != request.MemberIds.Count)
         {
-            throw new GroupServiceException(400, "VALIDATION_ERROR", "Nhóm phải có ít nhất một bạn bè được mời ngoài người tạo.");
+            throw new GroupServiceException(400, "VALIDATION_ERROR", "Danh sách thành viên không được chứa ID trùng lặp.");
+        }
+
+        if (request.MemberIds.Contains(currentUserId))
+        {
+            throw new GroupServiceException(400, "VALIDATION_ERROR", "Không được thêm chính mình vào danh sách thành viên được mời.");
+        }
+
+        if (request.MemberIds.Any(id => id == Guid.Empty))
+        {
+            throw new GroupServiceException(400, "VALIDATION_ERROR", "ID thành viên không hợp lệ.");
         }
 
         // Kiểm tra tất cả thành viên được mời: phải tồn tại và là bạn bè của người tạo
-        foreach (var memberId in distinctMemberIds)
+        foreach (var memberId in request.MemberIds)
         {
             var exists = await _db.Users.AsNoTracking().AnyAsync(u => u.Id == memberId, ct);
             if (!exists)
@@ -101,7 +106,7 @@ public class GroupService : IGroupService
             _db.GroupConversations.Add(groupConversation);
             _db.ConversationMembers.Add(creatorMember);
 
-            foreach (var memberId in distinctMemberIds)
+            foreach (var memberId in request.MemberIds)
             {
                 _db.ConversationMembers.Add(new ConversationMember
                 {
@@ -394,19 +399,21 @@ public class GroupService : IGroupService
 
         try
         {
-            request.Status = "Accepted";
-            request.ResolvedAt = DateTimeOffset.UtcNow;
-
+            // 1. Hạ quyền (demote) Admin cũ xuống làm Member TRƯỚC và lưu lại để tránh vi phạm unique index IX_ConversationMembers_OneActiveAdmin
             if (oldAdmin != null)
             {
                 oldAdmin.Role = "Member";
+                await _db.SaveChangesAsync(ct);
             }
 
+            // 2. Nâng quyền (promote) người mới lên làm Admin và cập nhật trạng thái yêu cầu
             nominee.Role = "Admin";
+            request.Status = "Accepted";
+            request.ResolvedAt = DateTimeOffset.UtcNow;
             conversation.LastActivityAt = DateTimeOffset.UtcNow;
-
             await _db.SaveChangesAsync(ct);
 
+            // 3. Cam kết thay đổi (Commit)
             if (transaction != null)
             {
                 await transaction.CommitAsync(ct);
