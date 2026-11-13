@@ -58,7 +58,7 @@
                     <button class="btn btn-sm older" @onclick="LoadOlderAsync" disabled="@(!active.HasOlder || active.Loading)">Tải tin nhắn cũ hơn</button>
                     <MessageList Items="active.Messages" CurrentUserId="Auth.CurrentUser!.Id" />
                     @if (errors.TryGetValue(id, out var sendError)) { <p class="alert alert-error" role="alert">@sendError</p> }
-                    <ChatComposer @key="id" Body="active.Draft" BodyChanged="value => active.Draft = value"
+                    <ChatComposer @key="id" Body="@active.Draft" BodyChanged="value => active.Draft = value"
                                   Retry="@(active.Pending is not null)" Disabled="@(active.Sending || !active.Initialized)" OnSend="SendAsync" />
                 }
                 else { <div class="chat-empty"><span class="brand-mark">C</span><h2>Chào mừng đến chat_zalo</h2><p>Chọn một hội thoại hoặc bắt đầu trò chuyện với bạn bè.</p></div> }
@@ -302,7 +302,10 @@
         catch (Exception ex)
         {
             if (disposed || owner != session) return;
-            if (ex is ApiException { StatusCode: 401 or 403 })
+            // Bị chặn (hoặc đã chặn người kia khi gửi): chỉ báo lỗi cho hội thoại này, không reset cả phiên chat
+            if (ex is ApiException { StatusCode: 403, Code: "CONVERSATION_ACCESS_DENIED" })
+                errors[id] = "Bạn không thể gửi hoặc xem tin nhắn trong hội thoại này vì một trong hai người đã chặn người kia.";
+            else if (ex is ApiException { StatusCode: 401 or 403 })
             {
                 owner?.Reset();
                 conversations.Clear();
