@@ -458,6 +458,84 @@ public class GroupServiceTests
         Assert.Equal("Member", members.Single(m => m.UserId == nominee.Id).Role);
     }
 
+    [Fact]
+    public async Task AdminTransfer_AlreadyAccepted_SubsequentAcceptOrReject_ThrowsConflict409()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var (service, friendships, db) = CreateService(dbName);
+
+        var oldAdmin = MakeUser("oldAdmin");
+        var nominee = MakeUser("nominee");
+        db.Users.AddRange(oldAdmin, nominee);
+        await db.SaveChangesAsync();
+
+        friendships.AddFriendship(oldAdmin.Id, nominee.Id);
+
+        var groupDto = await service.CreateGroupAsync(oldAdmin.Id, new CreateGroupRequest
+        {
+            Name = "Leadership Room",
+            MemberIds = new List<Guid> { nominee.Id }
+        });
+
+        var transferDto = await service.ProposeAdminTransferAsync(oldAdmin.Id, groupDto.Id, nominee.Id);
+
+        // First action: Accept
+        await service.AcceptAdminTransferAsync(nominee.Id, groupDto.Id, transferDto.Id);
+
+        // Second action: Reject -> should fail with 409 ADMIN_TRANSFER_ALREADY_RESOLVED
+        var exReject = await Assert.ThrowsAsync<GroupServiceException>(() =>
+            service.RejectAdminTransferAsync(nominee.Id, groupDto.Id, transferDto.Id));
+        Assert.Equal(409, exReject.StatusCode);
+        Assert.Equal("ADMIN_TRANSFER_ALREADY_RESOLVED", exReject.Code);
+        Assert.Equal("Yêu cầu này đã được xử lý.", exReject.Message);
+
+        // Second action: Accept again -> should fail with 409 ADMIN_TRANSFER_ALREADY_RESOLVED
+        var exAccept = await Assert.ThrowsAsync<GroupServiceException>(() =>
+            service.AcceptAdminTransferAsync(nominee.Id, groupDto.Id, transferDto.Id));
+        Assert.Equal(409, exAccept.StatusCode);
+        Assert.Equal("ADMIN_TRANSFER_ALREADY_RESOLVED", exAccept.Code);
+        Assert.Equal("Yêu cầu này đã được xử lý.", exAccept.Message);
+    }
+
+    [Fact]
+    public async Task AdminTransfer_AlreadyRejected_SubsequentAcceptOrReject_ThrowsConflict409()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var (service, friendships, db) = CreateService(dbName);
+
+        var oldAdmin = MakeUser("oldAdmin");
+        var nominee = MakeUser("nominee");
+        db.Users.AddRange(oldAdmin, nominee);
+        await db.SaveChangesAsync();
+
+        friendships.AddFriendship(oldAdmin.Id, nominee.Id);
+
+        var groupDto = await service.CreateGroupAsync(oldAdmin.Id, new CreateGroupRequest
+        {
+            Name = "Leadership Room",
+            MemberIds = new List<Guid> { nominee.Id }
+        });
+
+        var transferDto = await service.ProposeAdminTransferAsync(oldAdmin.Id, groupDto.Id, nominee.Id);
+
+        // First action: Reject
+        await service.RejectAdminTransferAsync(nominee.Id, groupDto.Id, transferDto.Id);
+
+        // Second action: Accept -> should fail with 409 ADMIN_TRANSFER_ALREADY_RESOLVED
+        var exAccept = await Assert.ThrowsAsync<GroupServiceException>(() =>
+            service.AcceptAdminTransferAsync(nominee.Id, groupDto.Id, transferDto.Id));
+        Assert.Equal(409, exAccept.StatusCode);
+        Assert.Equal("ADMIN_TRANSFER_ALREADY_RESOLVED", exAccept.Code);
+        Assert.Equal("Yêu cầu này đã được xử lý.", exAccept.Message);
+
+        // Second action: Reject again -> should fail with 409 ADMIN_TRANSFER_ALREADY_RESOLVED
+        var exReject = await Assert.ThrowsAsync<GroupServiceException>(() =>
+            service.RejectAdminTransferAsync(nominee.Id, groupDto.Id, transferDto.Id));
+        Assert.Equal(409, exReject.StatusCode);
+        Assert.Equal("ADMIN_TRANSFER_ALREADY_RESOLVED", exReject.Code);
+        Assert.Equal("Yêu cầu này đã được xử lý.", exReject.Message);
+    }
+
     // =======================================================================
     // 6. Rời nhóm (Leave Group)
     // =======================================================================

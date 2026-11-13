@@ -350,55 +350,65 @@ public class GroupService : IGroupService
 
     public async Task AcceptAdminTransferAsync(Guid currentUserId, Guid groupId, Guid requestId, CancellationToken ct = default)
     {
-        var conversation = await _db.Conversations
-            .Include(c => c.GroupConversation)
-            .FirstOrDefaultAsync(c => c.Id == groupId, ct);
-
-        if (conversation == null || conversation.Kind != "Group" || conversation.GroupConversation == null)
-        {
-            throw new GroupServiceException(400, "INVALID_CONVERSATION_KIND", "Hội thoại không phải là nhóm.");
-        }
-
-        if (conversation.GroupConversation.DeletedAt != null)
-        {
-            throw new GroupServiceException(403, "GROUP_ACCESS_DENIED", "Nhóm đã được giải tán.");
-        }
-
-        var request = await _db.GroupAdminTransferRequests
-            .FirstOrDefaultAsync(r => r.Id == requestId && r.ConversationId == groupId, ct);
-
-        if (request == null)
-        {
-            throw new GroupServiceException(404, "NOT_FOUND", "Yêu cầu chuyển quyền Admin không tồn tại.");
-        }
-
-        if (request.ToUserId != currentUserId)
-        {
-            throw new GroupServiceException(403, "GROUP_ACCESS_DENIED", "Chỉ người nhận quyền mới có thể chấp nhận yêu cầu.");
-        }
-
-        if (request.Status != "Pending")
-        {
-            throw new GroupServiceException(409, "ADMIN_TRANSFER_ALREADY_RESOLVED", "Yêu cầu này đã được xử lý.");
-        }
-
-        var nominee = await _db.ConversationMembers
-            .FirstOrDefaultAsync(m => m.ConversationId == groupId && m.UserId == currentUserId && m.LeftAt == null, ct);
-
-        if (nominee == null)
-        {
-            throw new GroupServiceException(404, "NOT_FOUND", "Người nhận quyền không còn là thành viên hoạt động.");
-        }
-
-        var oldAdmin = await _db.ConversationMembers
-            .FirstOrDefaultAsync(m => m.ConversationId == groupId && m.UserId == request.FromUserId && m.LeftAt == null, ct);
-
         await using var transaction = _db.Database.IsRelational()
             ? await _db.Database.BeginTransactionAsync(ct)
             : null;
 
         try
         {
+            GroupAdminTransferRequest? request;
+            if (_db.Database.IsRelational())
+            {
+                request = await _db.GroupAdminTransferRequests
+                    .FromSqlRaw("SELECT * FROM \"GroupAdminTransferRequests\" WHERE \"Id\" = {0} FOR UPDATE", requestId)
+                    .FirstOrDefaultAsync(ct);
+            }
+            else
+            {
+                request = await _db.GroupAdminTransferRequests
+                    .FirstOrDefaultAsync(r => r.Id == requestId && r.ConversationId == groupId, ct);
+            }
+
+            if (request == null || request.ConversationId != groupId)
+            {
+                throw new GroupServiceException(404, "NOT_FOUND", "Yêu cầu chuyển quyền Admin không tồn tại.");
+            }
+
+            if (request.ToUserId != currentUserId)
+            {
+                throw new GroupServiceException(403, "GROUP_ACCESS_DENIED", "Chỉ người nhận quyền mới có thể chấp nhận yêu cầu.");
+            }
+
+            if (request.Status != "Pending")
+            {
+                throw new GroupServiceException(409, "ADMIN_TRANSFER_ALREADY_RESOLVED", "Yêu cầu này đã được xử lý.");
+            }
+
+            var conversation = await _db.Conversations
+                .Include(c => c.GroupConversation)
+                .FirstOrDefaultAsync(c => c.Id == groupId, ct);
+
+            if (conversation == null || conversation.Kind != "Group" || conversation.GroupConversation == null)
+            {
+                throw new GroupServiceException(400, "INVALID_CONVERSATION_KIND", "Hội thoại không phải là nhóm.");
+            }
+
+            if (conversation.GroupConversation.DeletedAt != null)
+            {
+                throw new GroupServiceException(403, "GROUP_ACCESS_DENIED", "Nhóm đã được giải tán.");
+            }
+
+            var nominee = await _db.ConversationMembers
+                .FirstOrDefaultAsync(m => m.ConversationId == groupId && m.UserId == currentUserId && m.LeftAt == null, ct);
+
+            if (nominee == null)
+            {
+                throw new GroupServiceException(404, "NOT_FOUND", "Người nhận quyền không còn là thành viên hoạt động.");
+            }
+
+            var oldAdmin = await _db.ConversationMembers
+                .FirstOrDefaultAsync(m => m.ConversationId == groupId && m.UserId == request.FromUserId && m.LeftAt == null, ct);
+
             // 1. Hạ quyền (demote) Admin cũ xuống làm Member TRƯỚC và lưu lại để tránh vi phạm unique index IX_ConversationMembers_OneActiveAdmin
             if (oldAdmin != null)
             {
@@ -431,37 +441,67 @@ public class GroupService : IGroupService
 
     public async Task RejectAdminTransferAsync(Guid currentUserId, Guid groupId, Guid requestId, CancellationToken ct = default)
     {
-        var conversation = await _db.Conversations
-            .Include(c => c.GroupConversation)
-            .FirstOrDefaultAsync(c => c.Id == groupId, ct);
+        await using var transaction = _db.Database.IsRelational()
+            ? await _db.Database.BeginTransactionAsync(ct)
+            : null;
 
-        if (conversation == null || conversation.Kind != "Group" || conversation.GroupConversation == null)
+        try
         {
-            throw new GroupServiceException(400, "INVALID_CONVERSATION_KIND", "Hội thoại không phải là nhóm.");
+            GroupAdminTransferRequest? request;
+            if (_db.Database.IsRelational())
+            {
+                request = await _db.GroupAdminTransferRequests
+                    .FromSqlRaw("SELECT * FROM \"GroupAdminTransferRequests\" WHERE \"Id\" = {0} FOR UPDATE", requestId)
+                    .FirstOrDefaultAsync(ct);
+            }
+            else
+            {
+                request = await _db.GroupAdminTransferRequests
+                    .FirstOrDefaultAsync(r => r.Id == requestId && r.ConversationId == groupId, ct);
+            }
+
+            if (request == null || request.ConversationId != groupId)
+            {
+                throw new GroupServiceException(404, "NOT_FOUND", "Yêu cầu chuyển quyền Admin không tồn tại.");
+            }
+
+            if (request.ToUserId != currentUserId)
+            {
+                throw new GroupServiceException(403, "GROUP_ACCESS_DENIED", "Chỉ người nhận quyền mới có thể từ chối yêu cầu.");
+            }
+
+            if (request.Status != "Pending")
+            {
+                throw new GroupServiceException(409, "ADMIN_TRANSFER_ALREADY_RESOLVED", "Yêu cầu này đã được xử lý.");
+            }
+
+            var conversation = await _db.Conversations
+                .Include(c => c.GroupConversation)
+                .FirstOrDefaultAsync(c => c.Id == groupId, ct);
+
+            if (conversation == null || conversation.Kind != "Group" || conversation.GroupConversation == null)
+            {
+                throw new GroupServiceException(400, "INVALID_CONVERSATION_KIND", "Hội thoại không phải là nhóm.");
+            }
+
+            request.Status = "Rejected";
+            request.ResolvedAt = DateTimeOffset.UtcNow;
+
+            await _db.SaveChangesAsync(ct);
+
+            if (transaction != null)
+            {
+                await transaction.CommitAsync(ct);
+            }
         }
-
-        var request = await _db.GroupAdminTransferRequests
-            .FirstOrDefaultAsync(r => r.Id == requestId && r.ConversationId == groupId, ct);
-
-        if (request == null)
+        catch
         {
-            throw new GroupServiceException(404, "NOT_FOUND", "Yêu cầu chuyển quyền Admin không tồn tại.");
+            if (transaction != null)
+            {
+                await transaction.RollbackAsync(ct);
+            }
+            throw;
         }
-
-        if (request.ToUserId != currentUserId)
-        {
-            throw new GroupServiceException(403, "GROUP_ACCESS_DENIED", "Chỉ người nhận quyền mới có thể từ chối yêu cầu.");
-        }
-
-        if (request.Status != "Pending")
-        {
-            throw new GroupServiceException(409, "ADMIN_TRANSFER_ALREADY_RESOLVED", "Yêu cầu này đã được xử lý.");
-        }
-
-        request.Status = "Rejected";
-        request.ResolvedAt = DateTimeOffset.UtcNow;
-
-        await _db.SaveChangesAsync(ct);
     }
 
     public async Task LeaveGroupAsync(Guid currentUserId, Guid groupId, CancellationToken ct = default)
