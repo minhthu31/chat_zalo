@@ -1,6 +1,8 @@
 @using global::Chat.Client.Models
 @using global::Chat.Client.Services
 @inject IFriendshipApiClient FriendshipApi
+@inject ApiRequestSender Sender
+@inject IServiceProvider Services
 
 @if (_loading)
 {
@@ -31,6 +33,11 @@ else
         </p>
     }
 
+    @if (_blockNotice is not null)
+    {
+        <p class="alert alert-success">@_blockNotice</p>
+    }
+
     <div class="card">
         <h2 class="section-title">Bạn bè (@_friends.Count)</h2>
 
@@ -56,6 +63,27 @@ else
                 </span>
 
                 <span class="actions">
+                    @if (_blocked.Contains(friend.UserId))
+                    {
+                        <span class="badge-blocked">Đã chặn</span>
+                    }
+
+                    <button type="button"
+                            class="btn btn-sm"
+                            title="Người này sẽ không nhắn tin cho bạn được nữa"
+                            disabled="@(_busy || _blocked.Contains(friend.UserId))"
+                            @onclick="() => BlockAsync(friend, true)">
+                        Chặn
+                    </button>
+
+                    <button type="button"
+                            class="btn btn-sm"
+                            title="Cho phép người này nhắn tin lại"
+                            disabled="@_busy"
+                            @onclick="() => BlockAsync(friend, false)">
+                        Bỏ chặn
+                    </button>
+
                     <button type="button"
                             class="btn btn-danger btn-sm"
                             disabled="@_busy"
@@ -164,8 +192,57 @@ else
 
     private string? _loadError;
     private string? _actionError;
+    private string? _blockNotice;
 
-    protected override Task OnInitializedAsync() => ReloadAsync();
+    // Những người đã chặn TRONG phiên này. Backend chưa có API xem danh sách chặn,
+    // nên sau khi tải lại trang danh sách này trống; vì vậy nút "Bỏ chặn" luôn bấm được.
+    private readonly HashSet<Guid> _blocked = new();
+
+    private IBlockApiClient _blocks = default!;
+
+    protected override Task OnInitializedAsync()
+    {
+        // Nếu Program.cs đã đăng ký IBlockApiClient thì dùng bản đó, chưa thì dùng bản thật
+        _blocks = Services.GetService(typeof(IBlockApiClient)) as IBlockApiClient
+                  ?? new BlockApiClient(Sender);
+
+        return ReloadAsync();
+    }
+
+    // Chặn (block = true) hoặc bỏ chặn (block = false). Không đổi quan hệ bạn bè nên không cần tải lại danh sách.
+    private async Task BlockAsync(FriendshipDto friend, bool block)
+    {
+        if (_busy)
+            return;
+
+        _busy = true;
+        _actionError = null;
+        _blockNotice = null;
+
+        try
+        {
+            if (block)
+            {
+                await _blocks.BlockAsync(friend.UserId);
+                _blocked.Add(friend.UserId);
+                _blockNotice = $"Đã chặn {friend.DisplayName}.";
+            }
+            else
+            {
+                await _blocks.UnblockAsync(friend.UserId);
+                _blocked.Remove(friend.UserId);
+                _blockNotice = $"Đã bỏ chặn {friend.DisplayName}.";
+            }
+        }
+        catch (ApiException ex)
+        {
+            _actionError = FriendshipErrors.ToMessage(ex.Code);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
 
     public async Task ReloadAsync()
     {
