@@ -100,8 +100,9 @@ public class ConversationService : IConversationService
                 "DIRECT_CONVERSATION_NOT_ALLOWED");
         }
 
-        await using var transaction =
-            await _dbContext.Database.BeginTransactionAsync();
+        await using var transaction = _dbContext.Database.IsRelational()
+            ? await _dbContext.Database.BeginTransactionAsync()
+            : null;
 
         try
         {
@@ -152,20 +153,26 @@ public class ConversationService : IConversationService
             _dbContext.ConversationMembers.Add(targetMember);
 
             await _dbContext.SaveChangesAsync();
-            await transaction.CommitAsync();
+
+            if (transaction != null)
+            {
+                await transaction.CommitAsync();
+            }
 
             return ToDto(conversation, isNewlyCreated: true);
         }
         catch (DbUpdateException ex)
             when (ex.InnerException is PostgresException
             {
-                SqlState: PostgresErrorCodes.UniqueViolation,
-                ConstraintName: "IX_DirectConversations_UserLowId_UserHighId"
-            })
+                SqlState: PostgresErrorCodes.UniqueViolation
+            } || ex.InnerException is PostgresException { SqlState: "23505" })
         {
             // Một request khác đã tạo hội thoại cho cùng cặp người dùng.
-            await transaction.RollbackAsync();
-            await transaction.DisposeAsync();
+            if (transaction != null)
+            {
+                await transaction.RollbackAsync();
+                await transaction.DisposeAsync();
+            }
 
             _dbContext.ChangeTracker.Clear();
 
@@ -184,7 +191,10 @@ public class ConversationService : IConversationService
         }
         catch
         {
-            await transaction.RollbackAsync();
+            if (transaction != null)
+            {
+                await transaction.RollbackAsync();
+            }
             throw;
         }
     }

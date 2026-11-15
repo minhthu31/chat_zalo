@@ -884,7 +884,180 @@ public sealed class MessageServiceTests
             Assert.Equal("C second", newMessage.Body);
         }
     }
-    private sealed class FailMessageSaveInterceptor : SaveChangesInterceptor
+   [Fact]
+    public async Task Group_NonMemberAndFormerMember_CannotSendOrRead()
+    {
+        var (a, b, _, conversationId) = await SeedGroupAsync();
+        var outsider = Guid.NewGuid();
+
+        // 1. Người ngoài nhóm không được gửi hoặc đọc
+        var outsiderSend = await Assert.ThrowsAsync<MessageServiceException>(
+            () => SendAsync(outsider, conversationId, Guid.NewGuid(), "outsider send"));
+        Assert.Equal(403, outsiderSend.StatusCode);
+
+        await using (var db = CreateContext())
+        {
+            var outsiderRead = await Assert.ThrowsAsync<MessageServiceException>(
+                () => CreateService(db).GetHistoryAsync(outsider, conversationId, null, 10));
+            Assert.Equal(403, outsiderRead.StatusCode);
+        }
+
+        // 2. Thành viên đã rời nhóm (LeftAt != null) không được gửi hoặc đọc
+        await using (var db = CreateContext())
+        {
+            await db.ConversationMembers
+                .Where(m => m.ConversationId == conversationId && m.UserId == b)
+                .ExecuteUpdateAsync(s => s.SetProperty(m => m.LeftAt, DateTimeOffset.UtcNow));
+        }
+
+        var formerSend = await Assert.ThrowsAsync<MessageServiceException>(
+            () => SendAsync(b, conversationId, Guid.NewGuid(), "former member send"));
+        Assert.Equal(403, formerSend.StatusCode);
+
+        await using (var db = CreateContext())
+        {
+            var formerRead = await Assert.ThrowsAsync<MessageServiceException>(
+                () => CreateService(db).GetHistoryAsync(b, conversationId, null, 10));
+            Assert.Equal(403, formerRead.StatusCode);
+        }
+    }
+
+    [Fact]
+    public async Task GroupPagination_Limit10WithBlocks_ReturnsExact10ValidMessagesWithoutDuplicatesOrGaps()
+    {
+        var (a, b, c, conversationId) = await SeedGroupAsync();
+
+        // A chặn B -> B sẽ không thấy các tin do A gửi
+        await using (var db = CreateContext())
+        {
+            await new BlockService(db).BlockAsync(a, b);
+        }
+
+        // Gửi 25 tin: cứ mỗi 3 tin thì A gửi 1 tin (bị ẩn với B), C gửi 2 tin (hợp lệ với B)
+        // Tổng cộng C gửi 17 tin hợp lệ, A gửi 8 tin bị chặn
+        for (int i = 1; i <= 25; i++)
+        {
+            var sender = (i % 3 == 0) ? a : c;
+            await SendAsync(sender, conversationId, Guid.NewGuid(), $"msg-{i}");
+        }
+
+        await using var readDb = CreateContext();
+        var service = CreateService(readDb);
+
+        // Trang 1 (mới nhất): phải lấy đủ 10 tin hợp lệ của C
+        var page1 = await service.GetHistoryAsync(b, conversationId, null, 10);
+        Assert.Equal(10, page1.Count);
+        Assert.All(page1, m => Assert.Equal(c, m.SenderUserId));
+        Assert.Equal(page1.Select(m => m.Seq).OrderBy(s => s), page1.Select(m => m.Seq));
+
+        // Trang 2 (lấy tiếp beforeSeq của tin cũ nhất trang 1): lấy 7 tin hợp lệ còn lại của C
+        var oldestSeqPage1 = page1.First().Seq;
+        var page2 = await service.GetHistoryAsync(b, conversationId, oldestSeqPage1, 10);
+        Assert.Equal(7, page2.Count);
+        Assert.All(page2, m => Assert.Equal(c, m.SenderUserId));
+
+        // Gộp 2 trang: đủ 17 tin hợp lệ, không trùng, không bỏ sót
+        var allFetchedIds = page2.Concat(page1).Select(m => m.Id).ToList();
+        Assert.Equal(17, allFetchedIds.Distinct().Count());
+    }
+
+    [Fact]
+    public async Task Group_1000Messages_StoresAndPaginatesAccurately()
+    {
+        var (a, b, c, conversationId) = await SeedGroupAsync();
+        var senders = new[] { a, b, c };
+        var now = DateTimeOffset.UtcNow;
+
+        // Nạp nhanh 1.000 tin nhắn vào nhóm trong DB test
+        await using (var db = CreateContext())
+        {
+            var bulkMessages = Enumerable.Range(1, 1000).Select(seq => new Message
+            {
+                Id = Guid.NewGuid(),
+                ConversationId = conversationId,
+                SenderUserId = senders[seq % 3],
+                ClientMessageId = Guid.NewGuid(),
+                Body = $"bulk-msg-{seq}",
+                Seq = seq,
+                CreatedAt = now.AddMilliseconds(seq)
+            }).ToList();
+
+            db.Messages.AddRange(bulkMessages);
+
+            await db.Conversations
+                .Where(conv => conv.Id == conversationId)
+                .ExecuteUpdateAsync(s => s.SetProperty(conv => conv.LastMessageSeq, 1000L));
+
+            await db.SaveChangesAsync();
+        }
+
+        await using var readDb = CreateContext();
+        var service = CreateService(readDb);
+
+        // Truy vấn trang mới nhất (991 -> 1000)
+        var latestPage = await service.GetHistoryAsync(a, conversationId, null, 10);
+        Assert.Equal(10, latestPage.Count);
+        Assert.Equal(Enumerable.Range(991, 10).Select(i => (long)i), latestPage.Select(m => m.Seq));
+
+        // Truy vấn trang cũ hơn bằng beforeSeq = 501 (491 -> 500)
+        var middlePage = await service.GetHistoryAsync(a, conversationId, 501, 10);
+        Assert.Equal(10, middlePage.Count);
+        Assert.Equal(Enumerable.Range(491, 10).Select(i => (long)i), middlePage.Select(m => m.Seq));
+
+        // Truy vấn tin mới bằng afterSeq = 990 (991 -> 1000)
+        var newPage = await service.GetNewMessagesAsync(a, conversationId, 990, 10);
+        Assert.Equal(10, newPage.Count);
+        Assert.Equal(Enumerable.Range(991, 10).Select(i => (long)i), newPage.Select(m => m.Seq));
+    }
+
+    [Fact]
+    public async Task Group_ConcurrentSendsAndRetries_EnsureUniqueSeqAndNoDuplicates()
+    {
+        var (a, b, c, conversationId) = await SeedGroupAsync();
+        var senders = new[] { a, b, c };
+
+        // 1. Gửi đồng thời 15 tin nhắn từ 3 thành viên khác nhau
+        var startSend = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var sendTasks = Enumerable.Range(0, 15).Select(async index =>
+        {
+            await startSend.Task;
+            return await SendAsync(
+                senders[index % 3],
+                conversationId,
+                Guid.NewGuid(),
+                $"group-concurrent-{index}");
+        }).ToArray();
+
+        startSend.SetResult(true);
+        var sendResponses = await Task.WhenAll(sendTasks);
+
+        Assert.Equal(
+            Enumerable.Range(1, 15).Select(n => (long)n),
+            sendResponses.Select(r => r.Seq).OrderBy(s => s));
+
+        // 2. Retry đồng thời 10 lần cùng 1 ClientMessageId trong nhóm
+        var retryClientId = Guid.NewGuid();
+        var startRetry = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var retryTasks = Enumerable.Range(0, 10).Select(async _ =>
+        {
+            await startRetry.Task;
+            return await SendAsync(a, conversationId, retryClientId, "group-retry-body");
+        }).ToArray();
+
+        startRetry.SetResult(true);
+        var retryResponses = await Task.WhenAll(retryTasks);
+
+        Assert.Single(retryResponses, r => r.IsNewlyCreated);
+        Assert.Single(retryResponses.Select(r => r.Id).Distinct());
+
+        await using var verify = CreateContext();
+        Assert.Equal(16, await verify.Messages.CountAsync(m => m.ConversationId == conversationId));
+        Assert.Equal(16L, await verify.Conversations
+            .Where(conv => conv.Id == conversationId)
+            .Select(conv => conv.LastMessageSeq)
+            .SingleAsync());
+    }
+     private sealed class FailMessageSaveInterceptor : SaveChangesInterceptor
     {
         private readonly Guid _conversationId;
         private readonly long _expectedSequence;

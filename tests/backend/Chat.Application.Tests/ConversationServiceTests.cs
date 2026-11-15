@@ -20,6 +20,7 @@ public class ConversationServiceTests
     {
         var options = new DbContextOptionsBuilder<ChatDbContext>()
             .UseInMemoryDatabase(databaseName: dbName)
+            .ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.InMemoryEventId.TransactionIgnoredWarning))
             .Options;
 
         return new ChatDbContext(options);
