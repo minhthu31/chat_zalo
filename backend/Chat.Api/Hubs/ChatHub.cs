@@ -18,7 +18,7 @@ namespace chat_zalo.Hubs
             _tracker = tracker;
         }
 
-        public async Task JoinConversation(string conversationIdStr)
+        public async Task JoinConversation(string conversationIdStr, long? afterSeq = null)
         {
             if (!Guid.TryParse(conversationIdStr, out var conversationId))
             {
@@ -33,6 +33,7 @@ namespace chat_zalo.Hubs
                 throw new HubException("Unauthorized user.");
             }
 
+            // Kiểm tra quyền: Phải là thành viên và chưa rời nhóm (LeftAt == null)
             var isMember = await _dbContext.ConversationMembers
                 .AnyAsync(cm => cm.ConversationId == conversationId
                              && cm.UserId == userId
@@ -45,9 +46,21 @@ namespace chat_zalo.Hubs
 
             string groupName = conversationId.ToString("D");
 
-            // Sử dụng đúng tên phương thức AddSubscription
+            // Đăng ký subscription và thêm vào group SignalR
             _tracker.AddSubscription(Context.ConnectionId, userId, conversationId);
             await Groups.AddToGroupAsync(Context.ConnectionId, groupName);
+
+            // Bổ sung theo yêu cầu S2-08 (Mục 6): Hỗ trợ reconnect và đồng bộ tin nhắn còn thiếu bằng afterSeq
+            if (afterSeq.HasValue)
+            {
+                var missedMessages = await _dbContext.Messages
+                    .Where(m => m.ConversationId == conversationId && m.Seq > afterSeq.Value)
+                    .OrderBy(m => m.Seq)
+                    .ToListAsync();
+
+                // Gửi tin nhắn bù về cho riêng Client vừa reconnect
+                await Clients.Caller.SendAsync("ReceiveMissedMessages", missedMessages);
+            }
         }
 
         public async Task LeaveConversation(string conversationIdStr)
@@ -59,7 +72,7 @@ namespace chat_zalo.Hubs
 
             string groupName = conversationId.ToString("D");
 
-            // Sử dụng đúng tên phương thức RemoveSubscription
+            // Xử lý hủy subscription an toàn, không làm ảnh hưởng hội thoại khác
             _tracker.RemoveSubscription(Context.ConnectionId, conversationId);
             await Groups.RemoveFromGroupAsync(Context.ConnectionId, groupName);
         }
