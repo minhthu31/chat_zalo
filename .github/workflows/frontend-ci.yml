@@ -6,9 +6,20 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_NOLOGO: 'true'
 
     steps:
       - name: Checkout source
@@ -24,3 +35,21 @@ jobs:
 
       - name: Build Frontend
         run: dotnet build frontend/Chat.Client.csproj --no-restore --configuration Release
+
+      - name: Restore Frontend tests
+        run: dotnet restore tests/frontend/Chat.Client.Tests/Chat.Client.Tests.csproj
+
+      - name: Test Frontend
+        run: >-
+          dotnet test tests/frontend/Chat.Client.Tests/Chat.Client.Tests.csproj
+          --no-restore --configuration Release
+          --logger trx --results-directory "${{ github.workspace }}/artifacts/ci/frontend"
+
+      - name: Upload Frontend test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-test-results
+          path: artifacts/ci/frontend/*.trx
+          if-no-files-found: warn
+          retention-days: 7
