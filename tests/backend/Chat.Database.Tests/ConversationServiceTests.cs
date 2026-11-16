@@ -1,5 +1,6 @@
 namespace Chat.Database.Tests;
 
+using Chat.Infrastructure.Services;
 using Chat.Application.DTOs.Conversations;
 using Chat.Application.Interfaces;
 using Chat.Application.Services;

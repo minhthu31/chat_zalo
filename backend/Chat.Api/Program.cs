@@ -1,4 +1,5 @@
 using Chat.Api.Controllers;
+using Chat.Api.Authorization;
 using Chat.Application.DTOs.Auth;
 using Chat.Application.Interfaces;
 using Chat.Application.Services;
@@ -6,6 +7,7 @@ using Chat.Infrastructure.Data;
 using chat_zalo.Hubs;
 using chat_zalo.Services;
 using Chat.Infrastructure.Identity;
+using Chat.Infrastructure.Services;
 using Humanizer.Configuration;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
@@ -34,6 +36,13 @@ builder.Services.AddIdentityCore<ApplicationUser>(options =>
 .AddEntityFrameworkStores<ChatDbContext>()
 .AddDefaultTokenProviders()
 .AddSignInManager();
+
+builder.Services.Configure<SecurityStampValidatorOptions>(options =>
+{
+    // CHAT-13: validate the Identity Security Stamp on every authenticated request
+    // so cookies issued before a password change are rejected on their next request.
+    options.ValidationInterval = TimeSpan.Zero;
+});
 
 var cookieName = configuration["Authentication:CookieName"] ?? "Chat.Auth";
 var antiforgeryCookieName = configuration["Authentication:AntiforgeryCookieName"]
@@ -65,6 +74,11 @@ builder.Services
         options.ExpireTimeSpan = TimeSpan.FromHours(cookieExpirationHours);
         options.SlidingExpiration = true;
 
+        // Revalidate the Identity security stamp on every authenticated request.
+        // This makes cookies issued before a password change invalid immediately.
+        options.Events.OnValidatePrincipal =
+            SecurityStampValidator.ValidatePrincipalAsync;
+
         // API clients receive JSON/status codes instead of browser login redirects.
         options.Events.OnRedirectToLogin = context =>
         {
@@ -87,6 +101,15 @@ builder.Services
                 Message = "Bạn không có quyền thực hiện thao tác này."
             });
         };
+    })
+    // Identity's security-stamp rejection signs out the remember-me 2FA cookie too.
+    // AddIdentityCore does not register Identity cookie handlers automatically.
+    .AddCookie(IdentityConstants.TwoFactorRememberMeScheme, options =>
+    {
+        options.Cookie.Name = $"{cookieName}.TwoFactorRememberMe";
+        options.Cookie.HttpOnly = true;
+        options.Cookie.SameSite = sameSite;
+        options.Cookie.SecurePolicy = securePolicy;
     });
 
 builder.Services.AddAuthorization();
@@ -123,7 +146,14 @@ builder.Services.AddCors(options =>
 
 // S1-02 application abstractions
 builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.AddScoped<IConversationService, Chat.Infrastructure.Services.ConversationService>();
+builder.Services.AddScoped<IBlockService, Chat.Infrastructure.Services.BlockService>();
+builder.Services.AddScoped<IFriendshipService, Chat.Infrastructure.Services.FriendshipService>();
 builder.Services.AddScoped<IAccountGateway, IdentityAccountGateway>();
+builder.Services.AddScoped<IUserService, UserService>();
+builder.Services.AddScoped<IUserAccountGateway, IdentityUserAccountGateway>();
+builder.Services.AddScoped<IMessageService, Chat.Infrastructure.Services.MessageService>();
+builder.Services.AddScoped<IGroupService, Chat.Infrastructure.Services.GroupService>();
 
 builder.Services.AddControllers();
 
@@ -144,10 +174,10 @@ builder.Services.Configure<Microsoft.AspNetCore.Mvc.ApiBehaviorOptions>(options 
         {
             Code = "VALIDATION_ERROR",
             Message = message
+
         });
     };
 });
-
 // OpenAPI chuẩn .NET 10
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddOpenApi();
@@ -155,9 +185,14 @@ builder.Services.AddSignalR();
 
 // Đăng ký DI bắt buộc cho CHAT-8
 builder.Services.AddSingleton<IChatConnectionTracker, ChatConnectionTracker>();
-builder.Services.AddScoped<IChatNotificationService, ChatNotificationService>();
+builder.Services.AddScoped<ChatNotificationService>();
+builder.Services.AddScoped<IChatNotificationService>(services =>
+    services.GetRequiredService<ChatNotificationService>());
+builder.Services.AddScoped<IConversationEventPublisher>(services =>
+    services.GetRequiredService<ChatNotificationService>());
 
-var app = builder.Build();
+   builder.Services.AddGroupPermissions();
+   var app = builder.Build();
 
 // Middleware order: CORS -> Authentication -> Authorization
 app.UseCors("Frontend");

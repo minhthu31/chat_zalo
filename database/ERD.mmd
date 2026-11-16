@@ -1,56 +1,85 @@
+%% chat_zalo – ERD Sprint 1 + Sprint 2
+%% This Mermaid source renders on GitHub Preview; a PNG cannot be embedded directly in an .mmd file.
 erDiagram
-  Users ||--o{ Friendships : involved
-  Users ||--o{ UserBlocks : involved
-  Users ||--o{ Conversations : creates
-  Users ||--o{ ConversationMembers : joins
-  Users ||--o{ Messages : sends
-  Conversations ||--o| DirectConversations : direct
-  Conversations ||--o{ ConversationMembers : members
-  Conversations ||--o{ Messages : holds
+    Users ||--o{ Friendships : involved
+    Users ||--o{ UserBlocks : involved
+    Users ||--o{ Conversations : creates
+    Users ||--o{ ConversationMembers : joins
+    Users ||--o{ Messages : sends
+    Conversations ||--o| DirectConversations : direct
+    Conversations ||--o| GroupConversations : group
+    Conversations ||--o{ ConversationMembers : members
+    Conversations ||--o{ Messages : holds
+    Conversations ||--o{ GroupAdminTransferRequests : transfers
+    Users ||--o{ GroupAdminTransferRequests : from_user
+    Users ||--o{ GroupAdminTransferRequests : to_user
 
-  Users {
-    uuid Id PK
-    string UserName
-    string NormalizedUserName UK
-    string Email
-    string NormalizedEmail UK
-    string DisplayName
-  }
-  Friendships {
-    uuid UserLowId PK,FK
-    uuid UserHighId PK,FK
-    uuid RequesterUserId FK
-    string Status
-  }
-  UserBlocks {
-    uuid BlockerUserId PK,FK
-    uuid BlockedUserId PK,FK
-  }
-  Conversations {
-    uuid Id PK
-    uuid CreatedByUserId FK
-    string Kind
-    bigint LastMessageSeq
-  }
-  DirectConversations {
-    uuid ConversationId PK,FK
-    uuid UserLowId FK
-    uuid UserHighId FK
-  }
-  ConversationMembers {
-    uuid ConversationId PK,FK
-    uuid UserId PK,FK
-    bigint LastDeliveredSeq
-    bigint LastReadSeq
-  }
-  Messages {
-    uuid Id PK
-    uuid ConversationId FK
-    uuid SenderUserId FK
-    uuid ClientMessageId
-    bigint Seq
-    string Body
-    timestamptz CreatedAt
-  }
+    Users {
+      uuid Id PK
+      string UserName
+      string NormalizedUserName UK
+      string Email
+      string NormalizedEmail UK
+      string DisplayName
+    }
+    Friendships {
+      uuid UserLowId PK,FK
+      uuid UserHighId PK,FK
+      uuid RequesterUserId FK
+      string Status
+    }
+    UserBlocks {
+      uuid BlockerUserId PK,FK
+      uuid BlockedUserId PK,FK
+    }
+    Conversations {
+      uuid Id PK
+      uuid CreatedByUserId FK
+      string Kind
+      bigint LastMessageSeq
+    }
+    DirectConversations {
+      uuid ConversationId PK,FK
+      uuid UserLowId FK
+      uuid UserHighId FK
+    }
+    GroupConversations {
+      uuid ConversationId PK,FK
+      string Name
+      timestamptz DeletedAt
+    }
+    ConversationMembers {
+      uuid ConversationId PK,FK
+      uuid UserId PK,FK
+      bigint LastDeliveredSeq
+      bigint LastReadSeq
+      string Role
+      timestamptz LeftAt
+    }
+    GroupAdminTransferRequests {
+      uuid Id PK
+      uuid ConversationId FK
+      uuid FromUserId FK
+      uuid ToUserId FK
+      string Status
+      timestamptz CreatedAt
+      timestamptz ResolvedAt
+    }
+    Messages {
+      uuid Id PK
+      uuid ConversationId FK
+      uuid SenderUserId FK
+      uuid ClientMessageId
+      bigint Seq
+      string Body
+      timestamptz CreatedAt
+    }
+
+%% Sprint 1 tables retained. Sprint 2 proposes GroupConversations, GroupAdminTransferRequests,
+%% and Role / LeftAt on ConversationMembers. Confirm against actual ChatDbContext before migration.
+%% UNIQUE(ConversationId, Seq) and UNIQUE(ConversationId, SenderUserId, ClientMessageId) on Messages.
+%% UNIQUE(UserLowId, UserHighId) on DirectConversations.
+%% Group: partial UNIQUE ConversationMembers(ConversationId) WHERE Role='Admin' AND LeftAt IS NULL.
+%% This enforces at MOST one Admin; service transactions enforce AT LEAST one for active groups.
+%% Other FK/CHECK/uniqueness rules documented in DATABASE_RULES.md.
 %% Other Identity tables: Roles, UserRoles, UserClaims, RoleClaims, UserLogins, UserTokens.
-%% Composite UK and CHECK constraints are documented in DATABASE_RULES.md; Mermaid cannot represent all FKs independently.

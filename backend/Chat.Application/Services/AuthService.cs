@@ -67,6 +67,60 @@ public sealed class AuthService : IAuthService
     // Cookie được xóa ở HTTP boundary (AuthController); service không phụ thuộc HttpContext.
     public Task LogoutAsync() => Task.CompletedTask;
 
+    public async Task ChangePasswordAsync(Guid userId, ChangePasswordRequest request)
+    {
+        var errors = ValidateChangePassword(request);
+        if (errors.Count > 0)
+            throw AuthException.Validation(string.Join(" ", errors));
+
+        var result = await _accounts.ChangePasswordAsync(
+            userId,
+            request.CurrentPassword!,
+            request.NewPassword!);
+
+        switch (result.Status)
+        {
+            case ChangePasswordStatus.Success:
+                return;
+
+            case ChangePasswordStatus.InvalidCurrentPassword:
+                throw new AuthException(
+                    "INVALID_CURRENT_PASSWORD",
+                    "Mật khẩu hiện tại không đúng.",
+                    400);
+
+            case ChangePasswordStatus.InvalidInput:
+                throw AuthException.Validation(
+                    result.Error ?? "Mật khẩu mới không đáp ứng yêu cầu.");
+
+            default:
+                throw new AuthException(
+                    "INTERNAL_ERROR",
+                    "Không thể đổi mật khẩu.",
+                    500);
+        }
+    }
+
+    private static List<string> ValidateChangePassword(ChangePasswordRequest? request)
+    {
+        var errors = new List<string>();
+        if (request is null)
+        {
+            errors.Add("Dữ liệu đổi mật khẩu không được để trống.");
+            return errors;
+        }
+
+        if (string.IsNullOrEmpty(request.CurrentPassword)
+            || request.CurrentPassword.Length > MaxPasswordLength)
+            errors.Add("Mật khẩu hiện tại không được để trống và không vượt quá 256 ký tự.");
+
+        if (string.IsNullOrEmpty(request.NewPassword)
+            || request.NewPassword.Length > MaxPasswordLength)
+            errors.Add("Mật khẩu mới không được để trống và không vượt quá 256 ký tự.");
+
+        return errors;
+    }
+
     private static List<string> ValidateRegister(RegisterRequest? request)
     {
         var errors = new List<string>();
@@ -124,6 +178,15 @@ public enum AccountCreateStatus
 
 public sealed record AccountCreateResult(AccountCreateStatus Status, UserResponse? User = null, string? Error = null);
 
+public enum ChangePasswordStatus
+{
+    Success,
+    InvalidCurrentPassword,
+    InvalidInput
+}
+
+public sealed record ChangePasswordResult(ChangePasswordStatus Status, string? Error = null);
+
 public enum CredentialStatus
 {
     Success,
@@ -142,4 +205,6 @@ public interface IAccountGateway
     Task<AccountCreateResult> CreateAsync(string userName, string email, string password, string displayName);
 
     Task<CredentialResult> VerifyCredentialsAsync(string usernameOrEmail, string password);
+
+    Task<ChangePasswordResult> ChangePasswordAsync(Guid userId, string currentPassword, string newPassword);
 }

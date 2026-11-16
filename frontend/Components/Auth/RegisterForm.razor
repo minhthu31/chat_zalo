@@ -1,0 +1,95 @@
+@using System.ComponentModel.DataAnnotations
+@using Microsoft.AspNetCore.Components.Forms
+@using Chat.Client.Models
+@using Chat.Client.Services
+@inject IAuthApiClient AuthApi
+
+<EditForm Model="_model" OnValidSubmit="SubmitAsync" FormName="register">
+    <DataAnnotationsValidator />
+
+    <div class="field">
+        <label for="username">Tên đăng nhập</label>
+        <InputText id="username" @bind-Value="_model.Username" />
+        <ValidationMessage For="() => _model.Username" />
+    </div>
+
+    <div class="field">
+        <label for="email">Email</label>
+        <InputText id="email" type="email" @bind-Value="_model.Email" />
+        <ValidationMessage For="() => _model.Email" />
+    </div>
+
+    <div class="field">
+        <label for="password">Mật khẩu</label>
+        <InputText id="password" type="@(_showPassword ? "text" : "password")" autocomplete="new-password" @bind-Value="_model.Password" />
+        <ValidationMessage For="() => _model.Password" />
+        <label class="show-pw"><input type="checkbox" @bind="_showPassword" /> Hiện mật khẩu</label>
+        <p class="hint">Mật khẩu cần ít nhất 6 ký tự, có chữ hoa, chữ số và ký tự đặc biệt (ví dụ Passw0rd!x).</p>
+    </div>
+
+    @if (_error is not null)
+    {
+        <p role="alert" class="alert alert-error">@_error</p>
+    }
+
+    <button type="submit" class="btn btn-primary btn-block" disabled="@_busy">@(_busy ? "Đang đăng ký..." : "Đăng ký")</button>
+</EditForm>
+
+@code {
+    // Đăng ký xong KHÔNG tự đăng nhập (theo contract), trang chứa form sẽ đưa người dùng sang trang Login
+    [Parameter] public EventCallback OnSuccess { get; set; }
+
+    private readonly RegisterInput _model = new();
+    private string? _error;
+    private bool _busy;
+
+    // Tích vào ô "Hiện mật khẩu" thì ô nhập đổi từ type="password" sang type="text" để nhìn thấy chữ đã gõ
+    private bool _showPassword;
+
+    private async Task SubmitAsync()
+    {
+        _busy = true;
+        _error = null;
+
+        try
+        {
+            await AuthApi.RegisterAsync(new RegisterRequest
+            {
+                Username = _model.Username.Trim(),
+                Email = _model.Email.Trim(),
+                Password = _model.Password
+            });
+            await OnSuccess.InvokeAsync();
+        }
+        catch (ApiException ex)
+        {
+            // Xử lý theo Code. CONFLICT là mã chung (409) mà bản giả đang trả
+            _error = ex.Code switch
+            {
+                "USERNAME_ALREADY_EXISTS" => "Tên đăng nhập đã được sử dụng.",
+                "EMAIL_ALREADY_EXISTS" => "Email đã được sử dụng.",
+                "CONFLICT" => "Tên đăng nhập hoặc email đã được sử dụng.",
+                "INVALID_CSRF_TOKEN" => "Phiên làm việc hết hạn, vui lòng tải lại trang.",
+                "VALIDATION_ERROR" => "Dữ liệu nhập chưa hợp lệ.",
+                _ => "Không thể đăng ký, vui lòng thử lại."
+            };
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private class RegisterInput
+    {
+        [Required(ErrorMessage = "Vui lòng nhập tên đăng nhập.")]
+        public string Username { get; set; } = "";
+
+        [Required(ErrorMessage = "Vui lòng nhập email.")]
+        [EmailAddress(ErrorMessage = "Email không hợp lệ.")]
+        public string Email { get; set; } = "";
+
+        [Required(ErrorMessage = "Vui lòng nhập mật khẩu.")]
+        public string Password { get; set; } = "";
+    }
+}

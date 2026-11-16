@@ -1,0 +1,26 @@
+name: Frontend CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore Frontend
+        run: dotnet restore frontend/Chat.Client.csproj
+
+      - name: Build Frontend
+        run: dotnet build frontend/Chat.Client.csproj --no-restore --configuration Release

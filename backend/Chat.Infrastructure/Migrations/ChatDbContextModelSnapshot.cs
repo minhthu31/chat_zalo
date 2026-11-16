@@ -97,6 +97,11 @@ namespace Chat.Infrastructure.Migrations
 
                     b.HasKey("ConversationId", "UserId");
 
+                    b.HasIndex("ConversationId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_ConversationMembers_OneActiveAdmin")
+                        .HasFilter("\"Role\" = 'Admin' AND \"LeftAt\" IS NULL");
+
                     b.HasIndex("UserId");
 
                     b.ToTable("ConversationMembers", null, t =>
@@ -170,6 +175,76 @@ namespace Chat.Infrastructure.Migrations
                             t.HasCheckConstraint("CK_Friendships_Status", "\"Status\" IN ('Pending', 'Accepted', 'Rejected', 'Cancelled')");
 
                             t.HasCheckConstraint("CK_Friendships_UserOrder", "\"UserLowId\" < \"UserHighId\"");
+                        });
+                });
+
+            modelBuilder.Entity("Chat.Domain.Entities.GroupAdminTransferRequest", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ConversationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("FromUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("ResolvedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<Guid>("ToUserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ConversationId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_GroupAdminTransferRequests_OnePending")
+                        .HasFilter("\"Status\" = 'Pending'");
+
+                    b.HasIndex("ConversationId", "FromUserId");
+
+                    b.HasIndex("ConversationId", "ToUserId");
+
+                    b.ToTable("GroupAdminTransferRequests", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_GroupAdminTransferRequests_DifferentUsers", "\"FromUserId\" <> \"ToUserId\"");
+
+                            t.HasCheckConstraint("CK_GroupAdminTransferRequests_Resolution", "(\"Status\" = 'Pending') = (\"ResolvedAt\" IS NULL)");
+
+                            t.HasCheckConstraint("CK_GroupAdminTransferRequests_Status", "\"Status\" IN ('Pending', 'Accepted', 'Rejected', 'Cancelled')");
+                        });
+                });
+
+            modelBuilder.Entity("Chat.Domain.Entities.GroupConversation", b =>
+                {
+                    b.Property<Guid>("ConversationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("DeletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.HasKey("ConversationId");
+
+                    b.HasIndex("DeletedAt");
+
+                    b.ToTable("GroupConversations", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_GroupConversations_Name", "\"Name\" ~ '[^[:space:]]'");
                         });
                 });
 
@@ -507,6 +582,41 @@ namespace Chat.Infrastructure.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("Chat.Domain.Entities.GroupAdminTransferRequest", b =>
+                {
+                    b.HasOne("Chat.Domain.Entities.GroupConversation", "GroupConversation")
+                        .WithMany("AdminTransferRequests")
+                        .HasForeignKey("ConversationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Chat.Domain.Entities.ConversationMember", null)
+                        .WithMany()
+                        .HasForeignKey("ConversationId", "FromUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Chat.Domain.Entities.ConversationMember", null)
+                        .WithMany()
+                        .HasForeignKey("ConversationId", "ToUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_GroupAdminTransferRequests_ConversationMembers_Conversatio~1");
+
+                    b.Navigation("GroupConversation");
+                });
+
+            modelBuilder.Entity("Chat.Domain.Entities.GroupConversation", b =>
+                {
+                    b.HasOne("Chat.Domain.Entities.Conversation", "Conversation")
+                        .WithOne("GroupConversation")
+                        .HasForeignKey("Chat.Domain.Entities.GroupConversation", "ConversationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Conversation");
+                });
+
             modelBuilder.Entity("Chat.Domain.Entities.Message", b =>
                 {
                     b.HasOne("Chat.Domain.Entities.Conversation", "Conversation")
@@ -594,9 +704,16 @@ namespace Chat.Infrastructure.Migrations
                 {
                     b.Navigation("DirectConversation");
 
+                    b.Navigation("GroupConversation");
+
                     b.Navigation("Members");
 
                     b.Navigation("Messages");
+                });
+
+            modelBuilder.Entity("Chat.Domain.Entities.GroupConversation", b =>
+                {
+                    b.Navigation("AdminTransferRequests");
                 });
 #pragma warning restore 612, 618
         }

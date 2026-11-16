@@ -99,6 +99,261 @@ public class ConversationsHttpPostgresTests
         Assert.Equal(HttpStatusCode.Unauthorized, (await a.Send(HttpMethod.Get, "/api/conversations")).StatusCode);
     }
 
+    [Fact]
+public async Task Messages_CookieCsrfRetryPaginationAndBlocks_FollowContract()
+{
+    using var factory = new Factory();
+    factory.UseKestrel(options => options.Listen(IPAddress.Loopback, 0));
+
+    using var a = new Session(factory);
+    using var b = new Session(factory);
+    using var outsider = new Session(factory);
+    using var anonymous = new Session(factory);
+
+    var aid = await a.Register();
+    var bid = await b.Register();
+    await outsider.Register();
+
+    Assert.Equal(
+        HttpStatusCode.Created,
+        (await a.Send(
+            HttpMethod.Post,
+            "/api/friendships",
+            new { targetUserId = bid })).StatusCode);
+
+    Assert.Equal(
+        HttpStatusCode.NoContent,
+        (await b.Send(
+            HttpMethod.Post,
+            $"/api/friendships/{aid}/accept")).StatusCode);
+
+    var create = await a.Send(
+        HttpMethod.Post,
+        "/api/conversations/direct",
+        new { targetUserId = bid });
+
+    Assert.Equal(HttpStatusCode.Created, create.StatusCode);
+
+    var conversationId = (await Json(create)).GetProperty("id").GetGuid();
+    var path = $"/api/conversations/{conversationId}/messages";
+    var clientId = Guid.NewGuid();
+    var body = new { clientMessageId = clientId, body = "first message" };
+
+    // Chưa đăng nhập không được xem hoặc gửi tin.
+    Assert.Equal(
+        HttpStatusCode.Unauthorized,
+        (await anonymous.Send(HttpMethod.Get, path)).StatusCode);
+
+    Assert.Equal(
+        HttpStatusCode.Unauthorized,
+        (await anonymous.Send(HttpMethod.Post, path, body)).StatusCode);
+
+    // Thiếu/sai CSRF phải bị từ chối.
+    await Error(
+        await a.Send(HttpMethod.Post, path, body, csrf: false),
+        HttpStatusCode.BadRequest,
+        "INVALID_CSRF_TOKEN");
+
+    await Error(
+        await a.Send(HttpMethod.Post, path, body, invalidCsrf: true),
+        HttpStatusCode.BadRequest,
+        "INVALID_CSRF_TOKEN");
+
+    // Request bị từ chối không được lưu dữ liệu.
+    using (var scope = factory.Services.CreateScope())
+    {
+        var db = scope.ServiceProvider.GetRequiredService<ChatDbContext>();
+
+        Assert.Equal(
+            0,
+            await db.Messages.CountAsync(m =>
+                m.ConversationId == conversationId));
+
+        Assert.Equal(
+            0L,
+            await db.Conversations
+                .Where(c => c.Id == conversationId)
+                .Select(c => c.LastMessageSeq)
+                .SingleAsync());
+    }
+
+    // Gửi mới trả 201, đúng DTO và người gửi từ cookie.
+    var sent = await a.Send(HttpMethod.Post, path, body);
+    Assert.Equal(HttpStatusCode.Created, sent.StatusCode);
+
+    var message = await Json(sent);
+    var messageId = message.GetProperty("id").GetGuid();
+
+    Assert.Equal(
+        new[]
+        {
+            "body", "conversationId", "createdAt",
+            "id", "senderUserId", "seq"
+        },
+        message.EnumerateObject()
+            .Select(p => p.Name)
+            .OrderBy(name => name)
+            .ToArray());
+
+    Assert.Equal(aid, message.GetProperty("senderUserId").GetGuid());
+    Assert.Equal(conversationId,
+        message.GetProperty("conversationId").GetGuid());
+    Assert.Equal(1L, message.GetProperty("seq").GetInt64());
+    Assert.Equal("first message", message.GetProperty("body").GetString());
+    Assert.Equal(
+        TimeSpan.Zero,
+        message.GetProperty("createdAt").GetDateTimeOffset().Offset);
+
+    // Retry cùng nội dung trả 200 và cùng message ID.
+    var retry = await a.Send(HttpMethod.Post, path, body);
+
+    Assert.Equal(HttpStatusCode.OK, retry.StatusCode);
+    Assert.Equal(messageId, (await Json(retry)).GetProperty("id").GetGuid());
+
+    await Error(
+        await a.Send(
+            HttpMethod.Post,
+            path,
+            new { clientMessageId = clientId, body = "different body" }),
+        HttpStatusCode.Conflict,
+        "CLIENT_MESSAGE_ID_CONFLICT");
+
+    // Người ngoài hội thoại không được xem/gửi.
+    await Error(
+        await outsider.Send(HttpMethod.Get, path),
+        HttpStatusCode.Forbidden,
+        "CONVERSATION_ACCESS_DENIED");
+
+    await Error(
+        await outsider.Send(
+            HttpMethod.Post,
+            path,
+            new { clientMessageId = Guid.NewGuid(), body = "outsider" }),
+        HttpStatusCode.Forbidden,
+        "CONVERSATION_ACCESS_DENIED");
+
+    // Validation.
+    await Error(
+        await a.Send(
+            HttpMethod.Post,
+            path,
+            new { clientMessageId = Guid.Empty, body = "invalid" }),
+        HttpStatusCode.BadRequest,
+        "VALIDATION_ERROR");
+
+    await Error(
+        await a.Send(
+            HttpMethod.Post,
+            path,
+            new { clientMessageId = Guid.NewGuid(), body = "" }),
+        HttpStatusCode.BadRequest,
+        "VALIDATION_ERROR");
+
+    await Error(
+        await a.Send(
+            HttpMethod.Post,
+            path,
+            new
+            {
+                clientMessageId = Guid.NewGuid(),
+                body = new string('x', 4001)
+            }),
+        HttpStatusCode.BadRequest,
+        "VALIDATION_ERROR");
+
+    await Error(
+        await a.Send(
+            HttpMethod.Get,
+            path + "?beforeSeq=5&afterSeq=0"),
+        HttpStatusCode.BadRequest,
+        "INVALID_PAGINATION_PARAMETERS");
+
+    await Error(
+        await a.Send(HttpMethod.Get, path + "?limit=101"),
+        HttpStatusCode.BadRequest,
+        "INVALID_PAGINATION_PARAMETERS");
+
+    // Tạo thêm tin để kiểm tra phân trang.
+    for (var i = 2; i <= 5; i++)
+    {
+        Assert.Equal(
+            HttpStatusCode.Created,
+            (await a.Send(
+                HttpMethod.Post,
+                path,
+                new
+                {
+                    clientMessageId = Guid.NewGuid(),
+                    body = $"message-{i}"
+                })).StatusCode);
+    }
+
+    var latest = await Json(
+        await a.Send(HttpMethod.Get, path + "?limit=2"));
+
+    var before = await Json(
+        await a.Send(HttpMethod.Get, path + "?beforeSeq=4&limit=2"));
+
+    var after = await Json(
+        await b.Send(HttpMethod.Get, path + "?afterSeq=1&limit=2"));
+
+    Assert.Equal(
+        new long[] { 4, 5 },
+        latest.EnumerateArray().Select(m => m.GetProperty("seq").GetInt64()));
+
+    Assert.Equal(
+        new long[] { 2, 3 },
+        before.EnumerateArray().Select(m => m.GetProperty("seq").GetInt64()));
+
+    Assert.Equal(
+        new long[] { 2, 3 },
+        after.EnumerateArray().Select(m => m.GetProperty("seq").GetInt64()));
+
+    // Sau khi chặn: cả hai không gửi được.
+    Assert.Equal(
+        HttpStatusCode.NoContent,
+        (await b.Send(HttpMethod.Put, $"/api/blocks/{aid}")).StatusCode);
+
+    foreach (var session in new[] { a, b })
+    {
+        await Error(
+            await session.Send(
+                HttpMethod.Post,
+                path,
+                new { clientMessageId = Guid.NewGuid(), body = "blocked" }),
+            HttpStatusCode.Forbidden,
+            "CONVERSATION_ACCESS_DENIED");
+    }
+
+    // Người bị chặn không đọc được; người chặn vẫn đọc được.
+    await Error(
+        await a.Send(HttpMethod.Get, path),
+        HttpStatusCode.Forbidden,
+        "CONVERSATION_ACCESS_DENIED");
+
+    Assert.Equal(
+        HttpStatusCode.OK,
+        (await b.Send(HttpMethod.Get, path)).StatusCode);
+
+    // Tổng vẫn chỉ có 5 tin hợp lệ.
+    using (var scope = factory.Services.CreateScope())
+    {
+        var db = scope.ServiceProvider.GetRequiredService<ChatDbContext>();
+
+        Assert.Equal(
+            5,
+            await db.Messages.CountAsync(m =>
+                m.ConversationId == conversationId));
+
+        Assert.Equal(
+            5L,
+            await db.Conversations
+                .Where(c => c.Id == conversationId)
+                .Select(c => c.LastMessageSeq)
+                .SingleAsync());
+    }
+}
+
     private static async Task<JsonElement> Json(HttpResponseMessage r) => (await r.Content.ReadFromJsonAsync<JsonElement>()).Clone();
     private static async Task Error(HttpResponseMessage r, HttpStatusCode status, string code)
     {

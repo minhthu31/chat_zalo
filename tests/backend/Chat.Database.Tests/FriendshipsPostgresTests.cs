@@ -84,11 +84,13 @@ public sealed class FriendshipsPostgresTests
             var incomingForAlice = await service.GetRequestsAsync(alice.Id);
             Assert.Equal(bob.Id, Assert.Single(incomingForAlice.Incoming).UserId);
             await service.RejectAsync(alice.Id, bob.Id);
+            Assert.False(await service.AreFriendsAsync(alice.Id, bob.Id));
             var notPending = await Assert.ThrowsAsync<FriendshipException>(() => service.AcceptAsync(alice.Id, bob.Id));
             Assert.Equal(409, notPending.StatusCode);
 
             await service.SendRequestAsync(alice.Id, bob.Id);
             await service.RemoveAsync(alice.Id, bob.Id); // sender cancels outgoing Pending
+            Assert.False(await service.AreFriendsAsync(alice.Id, bob.Id));
             Assert.Equal(1, await db.Friendships.CountAsync(x =>
                 (x.UserLowId == alice.Id && x.UserHighId == bob.Id) ||
                 (x.UserLowId == bob.Id && x.UserHighId == alice.Id)));
@@ -103,6 +105,97 @@ public sealed class FriendshipsPostgresTests
             await db.Friendships.Where(x => x.UserLowId == alice.Id || x.UserHighId == alice.Id
                 || x.UserLowId == bob.Id || x.UserHighId == bob.Id).ExecuteDeleteAsync();
             await db.Users.Where(x => x.Id == alice.Id || x.Id == bob.Id).ExecuteDeleteAsync();
+        }
+    }
+
+    [Fact]
+    public async Task GroupInvitationEligibility_IsCheckedPerInviterAndOnlyForAcceptedPairs()
+    {
+        var alice = NewUser("alice_group_invite");
+        var bob = NewUser("bob_group_invite");
+        var charlie = NewUser("charlie_group_invite");
+
+        await using (var setup = CreateContext())
+        {
+            await setup.Users.AddRangeAsync(alice, bob, charlie);
+            await setup.SaveChangesAsync();
+        }
+
+        try
+        {
+            await using var db = CreateContext();
+            var service = new FriendshipService(db);
+
+            // A is friends with B, and B is friends with C. This authorizes
+            // A -> B and B -> C independently; it must not imply A -> C.
+            await service.SendRequestAsync(alice.Id, bob.Id);
+            Assert.False(await service.AreFriendsAsync(alice.Id, bob.Id)); // Pending
+            await service.AcceptAsync(bob.Id, alice.Id);
+            Assert.True(await service.AreFriendsAsync(alice.Id, bob.Id));
+
+            await service.SendRequestAsync(bob.Id, charlie.Id);
+            Assert.False(await service.AreFriendsAsync(bob.Id, charlie.Id)); // Pending
+            await service.AcceptAsync(charlie.Id, bob.Id);
+            Assert.True(await service.AreFriendsAsync(bob.Id, charlie.Id));
+            Assert.False(await service.AreFriendsAsync(alice.Id, charlie.Id));
+
+            // The Sprint 1 friend list remains Accepted-only and is scoped to
+            // the requesting user, not to every member of a group.
+            Assert.Equal(bob.Id, Assert.Single(await service.GetFriendsAsync(alice.Id)).UserId);
+            Assert.Equal(
+                new[] { alice.Id, charlie.Id }.OrderBy(id => id),
+                (await service.GetFriendsAsync(bob.Id)).Select(friend => friend.UserId).OrderBy(id => id));
+        }
+        finally
+        {
+            await using var cleanup = CreateContext();
+            var userIds = new[] { alice.Id, bob.Id, charlie.Id };
+            await cleanup.Friendships
+                .Where(x => userIds.Contains(x.UserLowId) || userIds.Contains(x.UserHighId))
+                .ExecuteDeleteAsync();
+            await cleanup.Users.Where(x => userIds.Contains(x.Id)).ExecuteDeleteAsync();
+        }
+    }
+
+    [Fact]
+    public async Task RevokedFriendship_IsDeniedWhenCheckedImmediatelyBeforeGroupMemberAddition()
+    {
+        var inviter = NewUser("group_inviter_revoked");
+        var invitee = NewUser("group_invitee_revoked");
+
+        await using (var setup = CreateContext())
+        {
+            await setup.Users.AddRangeAsync(inviter, invitee);
+            await setup.SaveChangesAsync();
+        }
+
+        try
+        {
+            await using var db = CreateContext();
+            var service = new FriendshipService(db);
+
+            await service.SendRequestAsync(inviter.Id, invitee.Id);
+            await service.AcceptAsync(invitee.Id, inviter.Id);
+            Assert.True(await service.AreFriendsAsync(inviter.Id, invitee.Id));
+
+            // Friendship is revoked after an earlier eligibility check.
+            await service.RemoveAsync(inviter.Id, invitee.Id);
+
+            // The group-membership caller must re-check at the point of
+            // addition; a previously successful check cannot be reused.
+            Assert.False(await service.AreFriendsAsync(inviter.Id, invitee.Id));
+            Assert.DoesNotContain(
+                await service.GetFriendsAsync(inviter.Id),
+                friend => friend.UserId == invitee.Id);
+        }
+        finally
+        {
+            await using var cleanup = CreateContext();
+            await cleanup.Friendships
+                .Where(x => (x.UserLowId == inviter.Id && x.UserHighId == invitee.Id)
+                         || (x.UserLowId == invitee.Id && x.UserHighId == inviter.Id))
+                .ExecuteDeleteAsync();
+            await cleanup.Users.Where(x => x.Id == inviter.Id || x.Id == invitee.Id).ExecuteDeleteAsync();
         }
     }
 

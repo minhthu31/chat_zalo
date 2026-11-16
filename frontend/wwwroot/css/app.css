@@ -1,1 +1,445 @@
-/* TODO: CSS chung do thành viên FE phụ trách. */
+/* ===== Giao diện Auth / Profile / Kết bạn (phần FE: Auth + Social) =====
+   Mọi style nằm trong .as-root nên KHÔNG ảnh hưởng các trang khác.
+   Muốn dùng: bọc trang bằng <div class="as-root">. */
+
+/* @keyframes không lồng được trong rule khác nên đặt ở ngoài, tên có tiền tố as- để không trùng */
+@keyframes as-fade-up {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.as-root {
+    --brand: #0068ff;
+    --brand-light: #4aa3ff;
+    --brand-dark: #0052cc;
+    --brand-soft: #e8f1ff;
+    --surface: #ffffff;
+    --field-bg: #f5f8fc;
+    --text: #1c2b33;
+    --muted: #6b7a85;
+    --border: #dfe6ee;
+    --danger: #d93025;
+    --danger-soft: #fdecea;
+    --success: #1e8e3e;
+    --success-soft: #e6f4ea;
+    --radius: 16px;
+    --shadow: 0 1px 2px rgba(28, 43, 51, 0.04), 0 8px 24px rgba(0, 104, 255, 0.08);
+
+    min-height: 100vh;
+    background: linear-gradient(160deg, #dbeaff 0%, #f4f7fb 45%, #eaf1f9 100%);
+    color: var(--text);
+    font-family: "Segoe UI", system-ui, -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-size: 16px;
+    line-height: 1.5;
+
+    a {
+        color: var(--brand);
+        font-weight: 600;
+        text-decoration: none;
+    }
+
+    a:hover {
+        text-decoration: underline;
+    }
+
+    /* ----- Bố cục trang ----- */
+    .page {
+        width: 100%;
+        box-sizing: border-box;
+        max-width: 640px;
+        margin: 0 auto;
+        padding: 2rem 1rem;
+    }
+
+    .page-narrow {
+        max-width: 420px;
+    }
+
+    /* Trang Đăng nhập / Đăng ký: căn giữa theo chiều dọc */
+    &.auth-center {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .card {
+        background: var(--surface);
+        border: 1px solid rgba(223, 230, 238, 0.7);
+        border-radius: var(--radius);
+        box-shadow: var(--shadow);
+        padding: 1.75rem;
+        margin-bottom: 1.25rem;
+        animation: as-fade-up 0.35s ease-out both;
+    }
+
+    .page-title {
+        margin: 0 0 1.25rem;
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: var(--text);
+        text-align: center;
+    }
+
+    .section-title {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin: 0 0 0.75rem;
+        font-size: 1.05rem;
+        font-weight: 700;
+    }
+
+    .section-title::before {
+        content: "";
+        width: 4px;
+        height: 1.1em;
+        border-radius: 2px;
+        background: linear-gradient(180deg, var(--brand-light), var(--brand));
+    }
+
+    .muted {
+        color: var(--muted);
+    }
+
+    .center {
+        text-align: center;
+    }
+
+    /* ----- Logo ở trang Đăng nhập / Đăng ký ----- */
+    .brand {
+        margin-bottom: 1.25rem;
+        text-align: center;
+    }
+
+    .brand-logo {
+        display: grid;
+        place-items: center;
+        width: 60px;
+        height: 60px;
+        margin: 0 auto 0.6rem;
+        border-radius: 18px;
+        background: linear-gradient(135deg, var(--brand), var(--brand-light));
+        box-shadow: 0 8px 20px rgba(0, 104, 255, 0.3);
+        color: #ffffff;
+        font-size: 1.7rem;
+        font-weight: 800;
+    }
+
+    .brand-name {
+        font-size: 1.35rem;
+        font-weight: 800;
+        letter-spacing: 0.02em;
+        color: var(--brand);
+    }
+
+    .brand-tagline {
+        margin-top: 0.1rem;
+        font-size: 0.9rem;
+        color: var(--muted);
+    }
+
+    /* ----- Form ----- */
+    .field {
+        margin-bottom: 1.1rem;
+    }
+
+    .field label {
+        display: block;
+        margin-bottom: 0.35rem;
+        font-size: 0.88rem;
+        font-weight: 600;
+    }
+
+    .field input,
+    .search-row input {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 0.7rem 0.9rem;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        font-size: 1rem;
+        background: var(--field-bg);
+        color: var(--text);
+        transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+    }
+
+    .field input:focus,
+    .search-row input:focus {
+        outline: none;
+        border-color: var(--brand);
+        background: var(--surface);
+        box-shadow: 0 0 0 4px var(--brand-soft);
+    }
+
+    /* Ô tích "Hiện mật khẩu" dưới ô nhập mật khẩu */
+    .field label.show-pw {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        margin: 0.4rem 0 0;
+        font-size: 0.85rem;
+        font-weight: 400;
+        color: var(--muted);
+        cursor: pointer;
+    }
+
+    .field .show-pw input {
+        width: auto;
+        margin: 0;
+        cursor: pointer;
+    }
+
+    .field .hint {
+        margin: 0.35rem 0 0;
+        font-size: 0.8rem;
+        color: var(--muted);
+    }
+
+    /* Blazor tự gắn các class này khi kiểm tra dữ liệu */
+    .field input.invalid {
+        border-color: var(--danger);
+    }
+
+    .validation-message {
+        margin-top: 0.3rem;
+        font-size: 0.84rem;
+        color: var(--danger);
+    }
+
+    /* ----- Nút ----- */
+    .btn {
+        display: inline-block;
+        padding: 0.6rem 1.1rem;
+        border: 1px solid transparent;
+        border-radius: 10px;
+        font-size: 0.95rem;
+        font-weight: 600;
+        cursor: pointer;
+        background: var(--brand-soft);
+        color: var(--brand);
+        transition: transform 0.12s, box-shadow 0.12s, filter 0.12s;
+    }
+
+    .btn:hover:not(:disabled) {
+        filter: brightness(0.97);
+        transform: translateY(-1px);
+    }
+
+    .btn:active:not(:disabled) {
+        transform: translateY(0);
+    }
+
+    .btn:disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
+    }
+
+    .btn-primary {
+        background: linear-gradient(135deg, var(--brand), var(--brand-light));
+        color: #ffffff;
+        box-shadow: 0 4px 12px rgba(0, 104, 255, 0.28);
+    }
+
+    .btn-primary:hover:not(:disabled) {
+        filter: brightness(1.06);
+        box-shadow: 0 6px 16px rgba(0, 104, 255, 0.34);
+    }
+
+    .btn-danger {
+        background: var(--danger-soft);
+        color: var(--danger);
+    }
+
+    .btn-block {
+        width: 100%;
+        padding: 0.75rem 1.1rem;
+        font-size: 1rem;
+    }
+
+    .btn-sm {
+        padding: 0.35rem 0.8rem;
+        font-size: 0.84rem;
+    }
+
+    /* ----- Thông báo ----- */
+    .alert {
+        margin: 0 0 1rem;
+        padding: 0.7rem 0.9rem;
+        border-radius: 10px;
+        font-size: 0.92rem;
+    }
+
+    .alert-error {
+        background: var(--danger-soft);
+        color: var(--danger);
+    }
+
+    .alert-success {
+        background: var(--success-soft);
+        color: var(--success);
+    }
+
+    .alert-info {
+        background: var(--brand-soft);
+        color: var(--brand-dark);
+    }
+
+    /* ----- Tìm kiếm và danh sách người ----- */
+    .search-row {
+        display: flex;
+        gap: 0.5rem;
+        margin-bottom: 1rem;
+    }
+
+    .search-row input {
+        flex: 1;
+    }
+
+    .list-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.75rem;
+        margin: 0 -0.6rem;
+        padding: 0.7rem 0.6rem;
+        border-radius: 12px;
+        transition: background 0.15s;
+    }
+
+    .list-item:hover {
+        background: var(--field-bg);
+    }
+
+    .person {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        min-width: 0;
+    }
+
+    .person-text {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        overflow-wrap: anywhere;
+        line-height: 1.3;
+    }
+
+    .person-name {
+        font-weight: 600;
+    }
+
+    .avatar {
+        display: grid;
+        place-items: center;
+        flex-shrink: 0;
+        width: 42px;
+        height: 42px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, var(--brand), var(--brand-light));
+        color: #ffffff;
+        font-weight: 700;
+        font-size: 1.05rem;
+    }
+
+    .avatar-lg {
+        width: 84px;
+        height: 84px;
+        margin: 0 auto 0.5rem;
+        font-size: 2.2rem;
+        box-shadow: 0 8px 20px rgba(0, 104, 255, 0.28);
+    }
+
+    .actions {
+        display: flex;
+        flex-shrink: 0;
+        gap: 0.4rem;
+    }
+
+    .profile-username {
+        margin: 0 0 1.25rem;
+        text-align: center;
+        color: var(--muted);
+    }
+
+    /* ----- Thanh điều hướng trên cùng (Hồ sơ / Tìm bạn / Đăng xuất) ----- */
+    .userbar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.75rem;
+        margin-bottom: 1.25rem;
+        padding: 0.6rem 1rem;
+        background: var(--surface);
+        border: 1px solid rgba(223, 230, 238, 0.7);
+        border-radius: var(--radius);
+        box-shadow: var(--shadow);
+    }
+
+    .userbar-links {
+        display: flex;
+        gap: 0.25rem;
+    }
+
+    .userbar-links a {
+        padding: 0.4rem 0.85rem;
+        border-radius: 999px;
+        color: var(--muted);
+        font-size: 0.92rem;
+    }
+
+    .userbar-links a:hover {
+        background: var(--field-bg);
+        text-decoration: none;
+    }
+
+    .userbar-links a.active {
+        background: var(--brand-soft);
+        color: var(--brand);
+    }
+
+    .userbar-user {
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+    }
+
+    .userbar-name {
+        max-width: 140px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 0.9rem;
+        font-weight: 600;
+    }
+
+    .avatar-sm {
+        width: 32px;
+        height: 32px;
+        font-size: 0.9rem;
+    }
+
+    /* ----- Màn hình nhỏ ----- */
+    @media (max-width: 480px) {
+        .page {
+            padding: 1rem;
+        }
+
+        .card {
+            padding: 1.25rem;
+        }
+
+        .list-item {
+            flex-direction: column;
+            align-items: flex-start;
+        }
+    }
+}

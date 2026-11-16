@@ -103,6 +103,29 @@ public sealed class AuthController : ControllerBase
         return NoContent();
     }
 
+    // 204 khi đổi mật khẩu thành công. Đăng xuất phiên hiện tại; Security Stamp vô hiệu hóa các phiên cũ khác.
+    [HttpPost("change-password")]
+    public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordRequest? request)
+    {
+        if (User.Identity?.IsAuthenticated != true)
+            return Unauthenticated();
+
+        var appUser = await _userManager.GetUserAsync(User);
+        if (appUser is null)
+            return Unauthenticated();
+
+        try
+        {
+            await _auth.ChangePasswordAsync(appUser.Id, request!);
+            await _signInManager.SignOutAsync();
+            return NoContent();
+        }
+        catch (AuthException ex)
+        {
+            return Error(ex);
+        }
+    }
+
     // 200 + UserResponse, hoặc 401 JSON khi chưa đăng nhập.
     [HttpGet("me")]
     public async Task<IActionResult> Me()
@@ -218,6 +241,37 @@ internal sealed class IdentityAccountGateway : IAccountGateway
             await _users.ResetAccessFailedCountAsync(user);
 
         return new CredentialResult(CredentialStatus.Success, ToResponse(user));
+    }
+
+    public async Task<ChangePasswordResult> ChangePasswordAsync(
+        Guid userId,
+        string currentPassword,
+        string newPassword)
+    {
+        var user = await _users.FindByIdAsync(userId.ToString());
+        if (user is null)
+            return new ChangePasswordResult(
+                ChangePasswordStatus.InvalidInput,
+                "Không tìm thấy tài khoản.");
+
+        var result = await _users.ChangePasswordAsync(user, currentPassword, newPassword);
+        if (!result.Succeeded)
+        {
+            if (result.Errors.Any(error =>
+                    error.Code == nameof(IdentityErrorDescriber.PasswordMismatch)))
+            {
+                return new ChangePasswordResult(ChangePasswordStatus.InvalidCurrentPassword);
+            }
+
+            return new ChangePasswordResult(
+                ChangePasswordStatus.InvalidInput,
+                string.Join(" ", result.Errors.Select(error => error.Description)));
+        }
+
+        // UserManager.ChangePasswordAsync updates the Security Stamp.
+        // The controller signs out the current cookie; other cookies carrying
+        // the previous stamp are rejected by SecurityStampValidator.
+        return new ChangePasswordResult(ChangePasswordStatus.Success);
     }
 
     private static UserResponse ToResponse(ApplicationUser user) => new()

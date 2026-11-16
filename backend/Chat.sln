@@ -15,6 +15,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Chat.Database.Tests", "..\t
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Chat.Users.Tests", "..\tests\backend\Chat.Users.Tests\Chat.Users.Tests.csproj", "{8A6E4F12-9C3B-4D7E-A1B2-C3D4E5F60718}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Chat.Application.Tests", "..\tests\backend\Chat.Application.Tests\Chat.Application.Tests.csproj", "{37472CE1-1D94-4292-94EC-095CBBB7E37A}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -97,6 +99,18 @@ Global
 		{8A6E4F12-9C3B-4D7E-A1B2-C3D4E5F60718}.Release|x64.Build.0 = Release|Any CPU
 		{8A6E4F12-9C3B-4D7E-A1B2-C3D4E5F60718}.Release|x86.ActiveCfg = Release|Any CPU
 		{8A6E4F12-9C3B-4D7E-A1B2-C3D4E5F60718}.Release|x86.Build.0 = Release|Any CPU
+		{37472CE1-1D94-4292-94EC-095CBBB7E37A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{37472CE1-1D94-4292-94EC-095CBBB7E37A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{37472CE1-1D94-4292-94EC-095CBBB7E37A}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{37472CE1-1D94-4292-94EC-095CBBB7E37A}.Debug|x64.Build.0 = Debug|Any CPU
+		{37472CE1-1D94-4292-94EC-095CBBB7E37A}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{37472CE1-1D94-4292-94EC-095CBBB7E37A}.Debug|x86.Build.0 = Debug|Any CPU
+		{37472CE1-1D94-4292-94EC-095CBBB7E37A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{37472CE1-1D94-4292-94EC-095CBBB7E37A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{37472CE1-1D94-4292-94EC-095CBBB7E37A}.Release|x64.ActiveCfg = Release|Any CPU
+		{37472CE1-1D94-4292-94EC-095CBBB7E37A}.Release|x64.Build.0 = Release|Any CPU
+		{37472CE1-1D94-4292-94EC-095CBBB7E37A}.Release|x86.ActiveCfg = Release|Any CPU
+		{37472CE1-1D94-4292-94EC-095CBBB7E37A}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

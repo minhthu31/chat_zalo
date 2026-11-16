@@ -43,6 +43,11 @@ public class ConversationConfiguration : IEntityTypeConfiguration<Conversation>
             .HasForeignKey<DirectConversation>(d => d.ConversationId)
             .OnDelete(DeleteBehavior.Cascade);
 
+        builder.HasOne(c => c.GroupConversation)
+            .WithOne(g => g.Conversation)
+            .HasForeignKey<GroupConversation>(g => g.ConversationId)
+            .OnDelete(DeleteBehavior.Cascade);
+
         builder.HasMany(c => c.Members)
             .WithOne(m => m.Conversation)
             .HasForeignKey(m => m.ConversationId)
