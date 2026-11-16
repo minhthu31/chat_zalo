@@ -181,7 +181,10 @@ builder.Services.Configure<Microsoft.AspNetCore.Mvc.ApiBehaviorOptions>(options 
 // OpenAPI chuẩn .NET 10
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddOpenApi();
-builder.Services.AddSignalR(options => { options.EnableDetailedErrors = true; });
+builder.Services.AddSignalR(options =>
+{
+    options.EnableDetailedErrors = builder.Environment.IsDevelopment();
+});
 
 // Đăng ký DI bắt buộc cho CHAT-8
 builder.Services.AddSingleton<IChatConnectionTracker, ChatConnectionTracker>();

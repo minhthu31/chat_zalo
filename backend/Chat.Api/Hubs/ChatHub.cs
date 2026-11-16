@@ -13,15 +13,18 @@ namespace chat_zalo.Hubs
         private readonly ChatDbContext _dbContext;
         private readonly IChatConnectionTracker _tracker;
         private readonly IGroupPermissionService _groupPermissions;
+        private readonly ILogger<ChatHub> _logger;
 
         public ChatHub(
             ChatDbContext dbContext,
             IChatConnectionTracker tracker,
-            IGroupPermissionService groupPermissions)
+            IGroupPermissionService groupPermissions,
+            ILogger<ChatHub> logger)
         {
             _dbContext = dbContext;
             _tracker = tracker;
             _groupPermissions = groupPermissions;
+            _logger = logger;
         }
 
         public async Task JoinConversation(string conversationIdStr)
@@ -90,7 +93,8 @@ namespace chat_zalo.Hubs
             }
             catch (Exception ex)
             {
-                throw new HubException($"Failed to join conversation: {ex.Message}");
+                _logger.LogError(ex, "Failed to join conversation for connection {ConnectionId}", Context.ConnectionId);
+                throw new HubException("Không thể tham gia hội thoại. Vui lòng thử lại sau.");
             }
         }
 
