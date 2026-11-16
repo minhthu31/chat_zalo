@@ -1,0 +1,24 @@
+﻿@using global::Chat.Client.Services
+@inject IBlockApiClient Blocks
+<button class="btn btn-sm" type="button" disabled="@busy" @onclick="() => Change(true)">Chặn</button>
+<button class="btn btn-sm" type="button" disabled="@busy" @onclick="() => Change(false)">Bỏ chặn</button>
+@if (notice is not null) { <small role="status">@notice</small> }
+@code {
+    [Parameter] public Guid UserId { get; set; }
+    [Parameter] public EventCallback OnChanged { get; set; }
+    private bool busy;
+    private string? notice;
+    private async Task Change(bool block)
+    {
+        if (busy) return;
+        busy = true; notice = null;
+        try {
+            if (block) await Blocks.BlockAsync(UserId); else await Blocks.UnblockAsync(UserId);
+            notice = block ? "Đã chặn người dùng." : "Đã bỏ chặn người dùng.";
+            await OnChanged.InvokeAsync();
+        }
+        catch (ApiException ex) { notice = ex.StatusCode == 401 ? "Vui lòng đăng nhập lại." : ex.Message; }
+        finally { busy = false; }
+    }
+}
+

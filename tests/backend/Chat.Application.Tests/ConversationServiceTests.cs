@@ -54,6 +54,7 @@ public class ConversationServiceTests
 
     private class MockBlockService : IBlockService
     {
+        public Task<List<Chat.Application.DTOs.Users.BlockedUserDto>> GetBlockedUsersAsync(Guid id) => Task.FromResult(new List<Chat.Application.DTOs.Users.BlockedUserDto>());
         public Func<Guid, Guid, Task<bool>>? IsBlockedHandler { get; set; }
         public Func<Guid, Guid, Task<bool>>? HasBlockedHandler { get; set; }
 

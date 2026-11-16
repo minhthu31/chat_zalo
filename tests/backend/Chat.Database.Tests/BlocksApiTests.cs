@@ -25,6 +25,7 @@ public class BlocksApiTests
 
     private sealed class FakeBlocks : IBlockService
     {
+        public Task<List<Chat.Application.DTOs.Users.BlockedUserDto>> GetBlockedUsersAsync(Guid id) => Task.FromResult(new List<Chat.Application.DTOs.Users.BlockedUserDto>());
         public int Calls;
         public Guid CurrentUser;
         public Guid TargetUser;
