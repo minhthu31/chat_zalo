@@ -26,18 +26,64 @@ namespace chat_zalo.Hubs
 
         public async Task JoinConversation(string conversationIdStr, long? afterSeq = null)
         {
-            if (!Guid.TryParse(conversationIdStr, out var conversationId))
+            try
             {
-                throw new HubException("Invalid conversation ID format.");
+                if (string.IsNullOrWhiteSpace(conversationIdStr) ||
+                    !Guid.TryParse(conversationIdStr, out var conversationId))
+                {
+                    throw new HubException("Invalid conversation ID format.");
+                }
+
+                var userIdStr = Context.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                             ?? Context.User?.FindFirst("sub")?.Value;
+
+                if (string.IsNullOrWhiteSpace(userIdStr) || !Guid.TryParse(userIdStr, out var userId))
+                {
+                    throw new HubException("Unauthorized user.");
+                }
+
+                var isMember = await _dbContext.ConversationMembers
+                    .AsNoTracking()
+                    .AnyAsync(cm => cm.ConversationId == conversationId
+                                 && cm.UserId == userId
+                                 && cm.LeftAt == null);
+
+                if (!isMember)
+                {
+                    _tracker.RemoveSubscription(Context.ConnectionId, conversationId);
+                    await Groups.RemoveFromGroupAsync(Context.ConnectionId, conversationId.ToString("D"));
+                    throw new HubException("You are not a member of this conversation.");
+                }
+
+                var groupName = conversationId.ToString("D");
+
+                _tracker.AddSubscription(Context.ConnectionId, userId, conversationId);
+                await Groups.AddToGroupAsync(Context.ConnectionId, groupName);
+
+                if (afterSeq.HasValue)
+                {
+                    var missedMessages = await _dbContext.Messages
+                        .AsNoTracking()
+                        .Where(m => m.ConversationId == conversationId && m.Seq > afterSeq.Value)
+                        .OrderBy(m => m.Seq)
+                        .ToListAsync();
+
+                    await Clients.Caller.SendAsync("ReceiveMissedMessages", missedMessages);
+                }
             }
+<<<<<<< HEAD
 
             var userIdStr = Context.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value
                           ?? Context.User?.FindFirst("sub")?.Value;
 
             if (string.IsNullOrEmpty(userIdStr) || !Guid.TryParse(userIdStr, out var userId))
+=======
+            catch (HubException)
+>>>>>>> ffae647 (fix(S2-08): handle membership revocation and hub exceptions cleanly)
             {
-                throw new HubException("Unauthorized user.");
+                throw;
             }
+<<<<<<< HEAD
 
             var kind = await _dbContext.Conversations
                 .AsNoTracking()
@@ -92,19 +138,24 @@ namespace chat_zalo.Hubs
 
                 // Gửi tin nhắn bù về cho riêng Client vừa reconnect
                 await Clients.Caller.SendAsync("ReceiveMissedMessages", missedMessages);
+=======
+            catch (Exception ex)
+            {
+                throw new HubException($"Failed to join conversation: {ex.Message}");
+>>>>>>> ffae647 (fix(S2-08): handle membership revocation and hub exceptions cleanly)
             }
         }
 
         public async Task LeaveConversation(string conversationIdStr)
         {
-            if (!Guid.TryParse(conversationIdStr, out var conversationId))
+            if (string.IsNullOrWhiteSpace(conversationIdStr) ||
+                !Guid.TryParse(conversationIdStr, out var conversationId))
             {
                 throw new HubException("Invalid conversation ID format.");
             }
 
-            string groupName = conversationId.ToString("D");
+            var groupName = conversationId.ToString("D");
 
-            // Xử lý hủy subscription an toàn, không làm ảnh hưởng hội thoại khác
             _tracker.RemoveSubscription(Context.ConnectionId, conversationId);
             await Groups.RemoveFromGroupAsync(Context.ConnectionId, groupName);
         }
