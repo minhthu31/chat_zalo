@@ -572,3 +572,9 @@ AdminTransferDto: {"id":"Guid","conversationId":"Guid","fromUserId":"Guid","toUs
 5. Chưa thuộc Sprint 2: file/ảnh và 2FA.
 
 **Tài liệu này là hợp đồng thiết kế Sprint 2; không có nghĩa code mới đã triển khai. Mọi thay đổi endpoint, DTO và quy tắc phải được Leader duyệt trước khi code.**
+
+### Bổ sung giao diện hội thoại cá nhân và danh sách chặn
+
+- `GET /api/blocks` yêu cầu đăng nhập, trả `200 [{userId,username,displayName,createdAt}]`: chỉ danh sách người do chính người gọi chặn; không trả quan hệ chiều ngược hoặc thông tin Identity nhạy cảm. GET không cần CSRF; PUT/DELETE giữ nguyên yêu cầu CSRF và response Sprint 1.
+- `GET /api/conversations/direct/titles` yêu cầu đăng nhập, trả `200 [{conversationId,userId,username,displayName}]`: thông tin công khai của người đối thoại trong các hội thoại Direct mà người gọi còn quyền truy cập, áp dụng cùng quy tắc thành viên và Blocks như danh sách hội thoại. FE dùng displayName, nếu trống dùng username. API `GET /api/conversations` và ConversationDto hiện có giữ nguyên.
+- FE `/chat` có thanh thông tin bên phải, hủy kết bạn và chặn/bỏ chặn; `/blocks` tải trạng thái từ Backend sau khi tải lại trang. Hủy kết bạn giữ lịch sử và ngừng cho gửi tin theo quy tắc hiện có. Thanh điều hướng dùng chung cho các trang Sprint 1.

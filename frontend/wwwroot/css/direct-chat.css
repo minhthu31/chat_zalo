@@ -1,0 +1,32 @@
+/* Keep personal conversation details beside messages on desktop. */
+@media (min-width:761px) {
+    .chat-root .direct-layout {
+        display:grid;
+        grid-template-columns:220px minmax(0,1fr) 260px;
+        align-items:stretch;
+    }
+    .chat-root .direct-layout > .chat-sidebar { grid-column:1; grid-row:1; }
+    .chat-root .direct-layout > .chat-main { grid-column:2; grid-row:1; }
+    .chat-root .direct-layout > .conversation-details { grid-column:3; grid-row:1; border-top:0; }
+}
+.direct-layout > .conversation-details {
+    box-sizing:border-box;
+    padding:24px 18px;
+    border-left:1px solid var(--border);
+    background:var(--surface);
+    min-width:0;
+    overflow-wrap:anywhere;
+}
+.direct-layout .conversation-details h2 { margin:0 0 24px; font-size:16px; }
+.direct-layout .details-person { text-align:center; }
+.direct-layout .details-person .avatar { margin:auto; width:60px; height:60px; font-size:24px; }
+.direct-layout .details-person h3 { margin:12px 0 4px; font-size:18px; }
+.direct-layout .details-person p { margin:0; font-size:13px; }
+.direct-layout .details-status { text-align:center; font-size:13px; padding:10px; background:var(--field-bg); border-radius:10px; }
+.direct-layout .details-actions { display:flex; flex-direction:column; gap:10px; margin-top:20px; }
+.direct-layout .details-help,.direct-layout .details-notice { font-size:13px; line-height:1.6; color:var(--muted); }
+.direct-layout .details-unfriend { color:var(--danger,#d93025); }
+.direct-layout .conversation-details a { font-size:13px; }
+@media (max-width:760px) {
+    .chat-root .direct-layout > .conversation-details { border-left:0; border-top:1px solid var(--border); }
+}

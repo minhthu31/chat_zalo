@@ -32,7 +32,7 @@
         <div class="chat-connection" role="status"><span class="connection-label"><i class="@(connected ? "online" : "")"></i>@connectionStatus</span>
             <button class="btn btn-sm" @onclick="RefreshAsync" disabled="@refreshing">@(refreshing ? "Đang đồng bộ…" : "Kết nối / đồng bộ lại")</button>
         </div>
-        <div class="chat-layout">
+        <div class="chat-layout direct-layout">
             <aside class="chat-sidebar">
                 <h2 class="section-title">Hội thoại <small>(@conversations.Count)</small></h2>
                 <form class="new-conversation" @onsubmit="CreateAsync" @onsubmit:preventDefault>
@@ -47,22 +47,27 @@
                 @if (refreshing && conversations.Count == 0) { <p class="muted">Đang tải hội thoại…</p> }
                 else
                 {
-                    <ConversationList Items="conversations" Selected="@(session.State.SelectedId ?? Guid.Empty)" OnSelect="SelectAsync" />
+                    <ConversationList Items="conversations" Titles="conversationTitles" Selected="@(session.State.SelectedId ?? Guid.Empty)" OnSelect="SelectAsync" />
                 }
             </aside>
             <main class="chat-main">
                 @if (session.State.SelectedId is Guid id && session.State.Active is { } active)
                 {
-                    <div class="chat-topbar"><span class="avatar">@id.ToString()[..2].ToUpperInvariant()</span><div><h2>Hội thoại @id.ToString()[..8]</h2><small class="muted">Trò chuyện cá nhân · Tin nhắn được lưu trên hệ thống</small></div></div>
+                    <div class="chat-topbar"><span class="avatar">@ConversationTitle(id)[..1].ToUpperInvariant()</span><div><h2>@ConversationTitle(id)</h2><small class="muted">Trò chuyện cá nhân · Tin nhắn được lưu trên hệ thống</small></div></div>
                     @if (active.Loading) { <p class="chat-loading" role="status">Đang tải tin nhắn…</p> }
                     <button class="btn btn-sm older" @onclick="LoadOlderAsync" disabled="@(!active.HasOlder || active.Loading)">Tải tin nhắn cũ hơn</button>
                     <MessageList Items="active.Messages" CurrentUserId="Auth.CurrentUser!.Id" />
                     @if (errors.TryGetValue(id, out var sendError)) { <p class="alert alert-error" role="alert">@sendError</p> }
-                    <ChatComposer @key="id" Body="active.Draft" BodyChanged="value => active.Draft = value"
-                                  Retry="@(active.Pending is not null)" Disabled="@(active.Sending || !active.Initialized)" OnSend="SendAsync" />
+                    @if (sendPermissions.TryGetValue(id, out var canSend) && !canSend) { <p class="muted">Bạn cần đang là bạn bè và bỏ chặn để gửi tin nhắn.</p> }
+                    <ChatComposer @key="id" Body="@active.Draft" BodyChanged="value => active.Draft = value"
+                                  Retry="@(active.Pending is not null)" Disabled="@(active.Sending || !active.Initialized || (sendPermissions.TryGetValue(id, out var allowed) && !allowed))" OnSend="SendAsync" />
                 }
                 else { <div class="chat-empty"><span class="brand-mark">C</span><h2>Chào mừng đến chat_zalo</h2><p>Chọn một hội thoại hoặc bắt đầu trò chuyện với bạn bè.</p></div> }
             </main>
+            @if (session.State.SelectedId is Guid detailsId && conversationPeers.TryGetValue(detailsId, out var peer))
+            {
+                <ConversationDetails @key="detailsId" Peer="peer" Revision="detailsRevision" OnChanged="RefreshFriendshipsAsync" CanSendChanged="value => sendPermissions[detailsId] = value" />
+            }
         </div>
     }
     @if (error is not null) { <p class="alert alert-error chat-global-error" role="alert">@error</p> }
@@ -78,6 +83,31 @@
     private Task? discoveryLoop;
     private int conversationRevision;
     private List<ConversationDto> conversations = [];
+    private Dictionary<Guid, string> conversationTitles = [];
+    private Dictionary<Guid, ConversationTitleDto> conversationPeers = [];
+    private readonly Dictionary<Guid, bool> sendPermissions = [];
+    private int detailsRevision;
+    private async Task RefreshFriendshipsAsync()
+    {
+        try { friends = await FriendshipApi.GetFriendsAsync(); }
+        catch (Exception ex) { error = Describe(ex); }
+    }
+    private string ConversationTitle(Guid id) => conversationTitles.GetValueOrDefault(id, "Trò chuyện cá nhân");
+
+    private async Task RefreshTitlesAsync()
+    {
+        try
+        {
+            var titles = await RequestSender.SendAsync<List<ConversationTitleDto>>(HttpMethod.Get, "api/conversations/direct/titles");
+            if (!disposed && Auth.IsAuthenticated)
+            {
+                conversationTitles = titles.ToDictionary(t => t.ConversationId, t => t.Title);
+                conversationPeers = titles.ToDictionary(t => t.ConversationId);
+                detailsRevision++;
+            }
+        }
+        catch (Exception ex) { if (!disposed) error = "Chưa tải được tên hội thoại: " + Describe(ex); }
+    }
     private List<FriendshipDto> friends = [];
     private Guid targetFriend;
     private readonly Dictionary<Guid, string> errors = [];
@@ -116,6 +146,9 @@
             discoveryLifetime.Cancel();
             session?.Reset();
             conversations.Clear();
+            conversationTitles.Clear();
+            conversationPeers.Clear();
+            sendPermissions.Clear();
             friends.Clear();
             errors.Clear();
             if (hub is not null) await hub.DisposeAsync();
@@ -176,7 +209,9 @@
                     {
                         var items = await discovery.RefreshAsync(ct);
                         if (disposed || ct.IsCancellationRequested || !Auth.IsAuthenticated || revision != conversationRevision) return;
+                        items = items.Where(c => c.Kind == "Direct").ToList();
                         conversations = items;
+                        await RefreshTitlesAsync();
                         if (session.State.SelectedId is Guid selected && !items.Any(c => c.Id == selected))
                             session.State.SelectedId = null;
                         if (session.State.SelectedId is Guid id)
@@ -219,6 +254,7 @@
             var items = await discovery.RefreshAsync(discoveryLifetime.Token);
             if (disposed || !Auth.IsAuthenticated) return;
             conversations = items.Where(c => c.Kind == "Direct").ToList();
+            await RefreshTitlesAsync();
             try { friends = await FriendshipApi.GetFriendsAsync(); }
             catch (Exception ex) { error = "Chưa tải được danh sách bạn bè: " + Describe(ex); }
             if (disposed || !Auth.IsAuthenticated) return;
@@ -266,6 +302,7 @@
             if (disposed || !Auth.IsAuthenticated) return;
             conversationRevision++;
             if (!conversations.Any(c => c.Id == conversation.Id)) conversations.Add(conversation);
+            await RefreshTitlesAsync();
             if (hub is not null)
                 try { await hub.JoinAsync(conversation.Id); }
                 catch (Exception ex) { error = "Realtime chưa sẵn sàng: " + Describe(ex); }

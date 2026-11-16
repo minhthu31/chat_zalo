@@ -1,0 +1,34 @@
+﻿@page "/blocks"
+@using global::Chat.Client.Services
+@using global::Chat.Client.Components.Auth
+@inject IBlockApiClient Api
+<PageTitle>Người đã chặn · chat_zalo</PageTitle>
+<div class="as-root"><div class="page"><UserBar /><section class="card">
+<h1>Người đã chặn</h1><button class="btn btn-sm" disabled="@busy" @onclick="Load">Tải lại</button>
+@if (error is not null) { <p class="alert alert-error" role="alert">@error</p> }
+@if (loading) { <p role="status">Đang tải…</p> }
+else if (users.Count == 0 && error is null) { <p>Chưa chặn người dùng nào.</p> }
+@foreach (var user in users) {
+    <div class="list-item" @key="user.UserId"><span>@(string.IsNullOrWhiteSpace(user.DisplayName) ? user.Username : user.DisplayName) <small>@@@user.Username</small></span>
+    <button class="btn btn-sm" disabled="@busy" @onclick="() => Unblock(user.UserId)">Bỏ chặn</button></div>
+}
+</section></div></div>
+@code {
+    private List<BlockedUserDto> users = [];
+    private bool loading = true, busy;
+    private string? error;
+    protected override Task OnInitializedAsync() => Load();
+    private async Task Load() {
+        loading = true; error = null;
+        try { users = await Api.GetAsync(); }
+        catch (ApiException ex) { users.Clear(); error = ex.StatusCode == 401 ? "Vui lòng đăng nhập để xem danh sách chặn." : ex.Message; }
+        finally { loading = false; }
+    }
+    private async Task Unblock(Guid id) {
+        busy = true; error = null;
+        try { await Api.UnblockAsync(id); await Load(); }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { busy = false; }
+    }
+}
+
