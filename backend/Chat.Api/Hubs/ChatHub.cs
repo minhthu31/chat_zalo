@@ -24,7 +24,7 @@ namespace chat_zalo.Hubs
             _groupPermissions = groupPermissions;
         }
 
-        public async Task JoinConversation(string conversationIdStr, long? afterSeq = null)
+        public async Task JoinConversation(string conversationIdStr)
         {
             try
             {
@@ -83,16 +83,6 @@ namespace chat_zalo.Hubs
                 _tracker.AddSubscription(Context.ConnectionId, userId, conversationId);
                 await Groups.AddToGroupAsync(Context.ConnectionId, groupName);
 
-                if (afterSeq.HasValue)
-                {
-                    var missedMessages = await _dbContext.Messages
-                        .AsNoTracking()
-                        .Where(m => m.ConversationId == conversationId && m.Seq > afterSeq.Value)
-                        .OrderBy(m => m.Seq)
-                        .ToListAsync();
-
-                    await Clients.Caller.SendAsync("ReceiveMissedMessages", missedMessages);
-                }
             }
             catch (HubException)
             {
