@@ -6,6 +6,14 @@ namespace Chat.Infrastructure.Services;
 
 public sealed class BlockService(ChatDbContext db) : IBlockService
 {
+    public Task<List<Chat.Application.DTOs.Users.BlockedUserDto>> GetBlockedUsersAsync(Guid currentUserId) =>
+        (from block in db.UserBlocks.AsNoTracking()
+         join user in db.Users.AsNoTracking() on block.BlockedUserId equals user.Id
+         where block.BlockerUserId == currentUserId
+         orderby block.CreatedAt descending, block.BlockedUserId
+         select new Chat.Application.DTOs.Users.BlockedUserDto(
+             user.Id, user.UserName ?? "", user.DisplayName, block.CreatedAt)).ToListAsync();
+
     public async Task BlockAsync(Guid currentUserId, Guid targetUserId)
     {
         if (currentUserId == targetUserId)

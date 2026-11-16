@@ -1,18 +1,15 @@
 namespace Chat.Client.Services;
 
-// Bản thật của IBlockApiClient
-public class BlockApiClient : IBlockApiClient
+public sealed record BlockedUserDto(Guid UserId, string Username, string DisplayName, DateTimeOffset CreatedAt);
+public interface IBlockApiClient
 {
-    private readonly ApiRequestSender _api;
-
-    public BlockApiClient(ApiRequestSender api)
-    {
-        _api = api;
-    }
-
-    public Task BlockAsync(Guid userId) =>
-        _api.SendAsync(HttpMethod.Put, $"api/blocks/{userId}");
-
-    public Task UnblockAsync(Guid userId) =>
-        _api.SendAsync(HttpMethod.Delete, $"api/blocks/{userId}");
+    Task<List<BlockedUserDto>> GetAsync();
+    Task BlockAsync(Guid userId);
+    Task UnblockAsync(Guid userId);
+}
+public sealed class BlockApiClient(ApiRequestSender api) : IBlockApiClient
+{
+    public Task<List<BlockedUserDto>> GetAsync() => api.SendAsync<List<BlockedUserDto>>(HttpMethod.Get, "api/blocks");
+    public Task BlockAsync(Guid userId) => api.SendAsync(HttpMethod.Put, $"api/blocks/{userId}");
+    public Task UnblockAsync(Guid userId) => api.SendAsync(HttpMethod.Delete, $"api/blocks/{userId}");
 }

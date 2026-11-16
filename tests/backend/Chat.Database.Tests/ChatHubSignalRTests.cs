@@ -25,7 +25,7 @@ using chat_zalo.Hubs;
 
 namespace Chat.Database.Tests;
 
-public sealed class ChatHubSignalRTests
+public sealed partial class ChatHubSignalRTests
 {
     private static string ConnectionString
     {

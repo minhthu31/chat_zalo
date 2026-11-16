@@ -1,0 +1,82 @@
+@using global::Chat.Client.Models
+@using global::Chat.Client.Services
+@implements IDisposable
+@inject IFriendshipApiClient Friendships
+@inject IBlockApiClient Blocks
+@inject IJSRuntime JS
+
+<aside class="conversation-details" aria-label="Thông tin hội thoại">
+    <h2>Thông tin hội thoại</h2>
+    <div class="details-person"><span class="avatar">@Peer.Title[..1].ToUpperInvariant()</span><h3>@Peer.Title</h3><p class="muted">@@@Peer.Username</p></div>
+    @if (loading) { <p class="muted" role="status">Đang kiểm tra trạng thái…</p> }
+    else if (known) {
+        <p class="details-status">@(blocked ? "Bạn đã chặn người này" : isFriend ? "Đang là bạn bè" : "Hiện không phải bạn bè")</p>
+    }
+    @if (notice is not null) { <p role="status" class="details-notice">@notice</p> }
+    @if (error is not null) { <p class="alert alert-error" role="alert">@error</p><button class="btn btn-sm" disabled="@busy" @onclick="Reload">Thử lại</button> }
+    <div class="details-actions">
+    @if (known && isFriend) {
+        <button type="button" class="btn details-unfriend" disabled="@busy" @onclick="Unfriend">Hủy kết bạn</button>
+    }
+    @if (known && blocked) {
+        <button type="button" class="btn btn-primary" disabled="@busy" @onclick="() => SetBlock(false)">Bỏ chặn người này</button>
+    } else {
+        <button type="button" class="btn btn-danger" disabled="@(busy || loading)" @onclick="() => SetBlock(true)">Chặn người này</button>
+        @if (!known) { <button type="button" class="btn" disabled="@busy" @onclick="() => SetBlock(false)">Bỏ chặn người này</button> }
+    }
+    </div>
+</aside>
+
+@code {
+    [Parameter, EditorRequired] public ConversationTitleDto Peer { get; set; } = default!;
+    [Parameter] public int Revision { get; set; }
+    [Parameter] public EventCallback OnChanged { get; set; }
+    [Parameter] public EventCallback<bool> CanSendChanged { get; set; }
+    private Guid loadedPeer;
+    private int loadedRevision = -1, generation;
+    private bool loading = true, known, isFriend, blocked, busy, disposed;
+    private string? error, notice;
+    protected override async Task OnParametersSetAsync() {
+        if (Peer.UserId == loadedPeer && Revision == loadedRevision) return;
+        loadedPeer = Peer.UserId; loadedRevision = Revision;
+        if (!busy) await Reload();
+    }
+    private async Task Reload() {
+        var userId = Peer.UserId; var version = ++generation;
+        loading = true; error = null;
+        try {
+            var friendsTask = Friendships.GetFriendsAsync(); var blocksTask = Blocks.GetAsync();
+            await Task.WhenAll(friendsTask, blocksTask);
+            if (disposed || version != generation || Peer.UserId != userId) return;
+            isFriend = friendsTask.Result.Any(u => u.UserId == userId);
+            blocked = blocksTask.Result.Any(u => u.UserId == userId);
+            known = true;
+            await CanSendChanged.InvokeAsync(isFriend && !blocked);
+        }
+        catch (ApiException ex) {
+            if (!disposed && version == generation) { known = false; error = ex.StatusCode == 401 ? "Vui lòng đăng nhập lại." : "Không tải được trạng thái. Bạn có thể thử lại hoặc bỏ chặn."; }
+        }
+        finally { if (!disposed && version == generation) loading = false; }
+    }
+    private async Task Unfriend() {
+        if (busy || !await JS.InvokeAsync<bool>("confirm", $"Hủy kết bạn với {Peer.Title}? Lịch sử trò chuyện vẫn được giữ lại.")) return;
+        await Change(async id => { await Friendships.RemoveAsync(id); notice = "Đã hủy kết bạn."; });
+    }
+    private Task SetBlock(bool value) => Change(async id => {
+        if (value) await Blocks.BlockAsync(id); else await Blocks.UnblockAsync(id);
+        notice = value ? "Đã chặn người dùng." : "Đã bỏ chặn người dùng.";
+    });
+    private async Task Change(Func<Guid, Task> operation) {
+        if (busy) return;
+        var userId = Peer.UserId;
+        busy = true; notice = null; error = null;
+        try {
+            await operation(userId);
+            if (disposed || Peer.UserId != userId) return;
+            await Reload(); await OnChanged.InvokeAsync();
+        }
+        catch (ApiException ex) { if (!disposed && Peer.UserId == userId) error = ex.StatusCode == 401 ? "Phiên hết hạn. Vui lòng đăng nhập lại." : ex.Message; }
+        finally { busy = false; }
+    }
+    public void Dispose() { disposed = true; generation++; }
+}

@@ -14,6 +14,14 @@ namespace Chat.Api.Controllers;
 [Route("api/blocks")]
 public sealed class BlocksController(IBlockService blocks) : ControllerBase
 {
+    [HttpGet]
+    public async Task<IActionResult> Get()
+    {
+        if (!Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId))
+            return Unauthorized(new { code = "UNAUTHORIZED", message = "Authentication is required." });
+        return Ok(await blocks.GetBlockedUsersAsync(userId));
+    }
+
     [HttpPut("{userId}")]
     public Task<IActionResult> Block(Guid userId) => ExecuteAsync(userId, blocks.BlockAsync);
 
