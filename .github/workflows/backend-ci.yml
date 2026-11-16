@@ -7,25 +7,20 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:18
-        env:
-          POSTGRES_DB: chat_zalo_test
-          POSTGRES_USER: chat_zalo
-          POSTGRES_PASSWORD: ci_test_password
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U chat_zalo -d chat_zalo_test"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
+    timeout-minutes: 20
     env:
-      CHAT_TEST_CONNECTION_STRING: Host=localhost;Port=5432;Database=chat_zalo_test;Username=chat_zalo;Password=ci_test_password
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_NOLOGO: 'true'
 
     steps:
       - name: Checkout source
@@ -35,6 +30,33 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
+
+      - name: Start isolated PostgreSQL 18 test database
+        shell: bash
+        run: |
+          set -euo pipefail
+          test_password="$(openssl rand -hex 24)"
+          echo "::add-mask::$test_password"
+          test_connection="Host=127.0.0.1;Port=5432;Database=chat_zalo_test;Username=chat_zalo;Password=$test_password"
+          echo "::add-mask::$test_connection"
+          printf 'CHAT_TEST_CONNECTION_STRING=%s\n' "$test_connection" >> "$GITHUB_ENV"
+          printf 'ConnectionStrings__DefaultConnection=%s\n' "$test_connection" >> "$GITHUB_ENV"
+          printf 'ConnectionStrings__ChatDb=%s\n' "$test_connection" >> "$GITHUB_ENV"
+          export POSTGRES_DB=chat_zalo_test POSTGRES_USER=chat_zalo POSTGRES_PASSWORD="$test_password"
+          docker run --detach --name chat-ci-postgres \
+            --publish 127.0.0.1:5432:5432 \
+            --env POSTGRES_DB --env POSTGRES_USER --env POSTGRES_PASSWORD \
+            --health-cmd 'pg_isready -U chat_zalo -d chat_zalo_test' \
+            --health-interval 2s --health-timeout 5s --health-retries 30 \
+            postgres:18
+          for attempt in {1..30}; do
+            if [ "$(docker inspect --format '{{.State.Health.Status}}' chat-ci-postgres)" = healthy ]; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo 'PostgreSQL test database did not become healthy.' >&2
+          exit 1
 
       - name: Restore Backend
         run: dotnet restore backend/Chat.sln
@@ -54,4 +76,23 @@ jobs:
           --connection "$CHAT_TEST_CONNECTION_STRING"
 
       - name: Test Backend
-        run: dotnet test backend/Chat.sln --no-build --no-restore --configuration Release
+        run: >-
+          dotnet test backend/Chat.sln --no-build --no-restore --configuration Release
+          --logger trx --results-directory "${{ github.workspace }}/artifacts/ci/backend"
+
+      - name: Upload Backend test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-results
+          path: artifacts/ci/backend/*.trx
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Show PostgreSQL diagnostics on failure
+        if: failure()
+        run: docker logs --tail 100 chat-ci-postgres || true
+
+      - name: Remove test database
+        if: always()
+        run: docker rm --force --volumes chat-ci-postgres || true
