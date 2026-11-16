@@ -47,6 +47,8 @@ public class ConversationsHttpPostgresTests
             $"{anonymous.BaseAddress}: {(int)anonymousResponse.StatusCode} {await anonymousResponse.Content.ReadAsStringAsync()}");
         Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.PostAsJsonAsync("/api/conversations/direct", new { targetUserId = Guid.NewGuid() })).StatusCode);
         var aid = await a.Register(); var bid = await b.Register(); await outsider.Register();
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync("/api/conversations/direct/titles")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync("/api/blocks")).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await a.Send(HttpMethod.Get, "/api/users/me")).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await a.Send(HttpMethod.Get, "/api/auth/me")).StatusCode);
 
@@ -62,9 +64,15 @@ public class ConversationsHttpPostgresTests
         Assert.Equal(HttpStatusCode.Created, (await a.Send(HttpMethod.Post, "/api/friendships", new { targetUserId = bid })).StatusCode);
         Assert.Equal(HttpStatusCode.NoContent, (await b.Send(HttpMethod.Post, $"/api/friendships/{aid}/accept")).StatusCode);
         Assert.Equal(HttpStatusCode.NoContent, (await b.Send(HttpMethod.Put, $"/api/blocks/{aid}")).StatusCode);
+        var blockedUsers = (await Json(await b.Send(HttpMethod.Get, "/api/blocks"))).EnumerateArray().ToArray();
+        var blockedUser = Assert.Single(blockedUsers);
+        Assert.Equal(aid, blockedUser.GetProperty("userId").GetGuid());
+        Assert.Equal(new[] { "createdAt", "displayName", "userId", "username" }, blockedUser.EnumerateObject().Select(x => x.Name).OrderBy(x => x));
+        Assert.Empty((await Json(await a.Send(HttpMethod.Get, "/api/blocks"))).EnumerateArray());
         await Error(await a.Send(HttpMethod.Post, "/api/conversations/direct", new { targetUserId = bid }), HttpStatusCode.Forbidden, "DIRECT_CONVERSATION_NOT_ALLOWED");
         await Error(await b.Send(HttpMethod.Post, "/api/conversations/direct", new { targetUserId = aid }), HttpStatusCode.Forbidden, "DIRECT_CONVERSATION_NOT_ALLOWED");
         Assert.Equal(HttpStatusCode.NoContent, (await b.Send(HttpMethod.Delete, $"/api/blocks/{aid}")).StatusCode);
+        Assert.Empty((await Json(await b.Send(HttpMethod.Get, "/api/blocks"))).EnumerateArray());
 
         var responses = await Task.WhenAll(
             a.Send(HttpMethod.Post, "/api/conversations/direct", new { targetUserId = bid }),
@@ -76,6 +84,18 @@ public class ConversationsHttpPostgresTests
         Assert.Equal(new[] { "id", "kind", "lastMessageSeq" }, dto.EnumerateObject().Select(p => p.Name).OrderBy(n => n).ToArray());
         Assert.Equal("Direct", dto.GetProperty("kind").GetString());
         Assert.Equal(0, dto.GetProperty("lastMessageSeq").GetInt64());
+        var titlesA = (await Json(await a.Send(HttpMethod.Get, "/api/conversations/direct/titles"))).EnumerateArray().ToArray();
+        var titlesB = (await Json(await b.Send(HttpMethod.Get, "/api/conversations/direct/titles"))).EnumerateArray().ToArray();
+        var titleA = Assert.Single(titlesA, x => x.GetProperty("conversationId").GetGuid() == id);
+        var titleB = Assert.Single(titlesB, x => x.GetProperty("conversationId").GetGuid() == id);
+        var userA = await Json(await a.Send(HttpMethod.Get, "/api/auth/me"));
+        var userB = await Json(await b.Send(HttpMethod.Get, "/api/auth/me"));
+        Assert.Equal(userB.GetProperty("username").GetString(), titleA.GetProperty("username").GetString());
+        Assert.Equal(userA.GetProperty("username").GetString(), titleB.GetProperty("username").GetString());
+        Assert.Equal(new[] { "conversationId", "displayName", "userId", "username" }, titleA.EnumerateObject().Select(x => x.Name).OrderBy(x => x));
+        Assert.Equal(bid, titleA.GetProperty("userId").GetGuid());
+        Assert.Equal(aid, titleB.GetProperty("userId").GetGuid());
+        Assert.Empty((await Json(await outsider.Send(HttpMethod.Get, "/api/conversations/direct/titles"))).EnumerateArray());
         using (var scope = factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<ChatDbContext>();
@@ -91,6 +111,8 @@ public class ConversationsHttpPostgresTests
         Assert.Equal(HttpStatusCode.NoContent, (await b.Send(HttpMethod.Put, $"/api/blocks/{aid}")).StatusCode);
         await Error(await a.Send(HttpMethod.Post, "/api/conversations/direct", new { targetUserId = bid }), HttpStatusCode.Forbidden, "CONVERSATION_ACCESS_DENIED");
         Assert.Empty((await Json(await a.Send(HttpMethod.Get, "/api/conversations"))).EnumerateArray());
+        Assert.Empty((await Json(await a.Send(HttpMethod.Get, "/api/conversations/direct/titles"))).EnumerateArray());
+        Assert.Contains((await Json(await b.Send(HttpMethod.Get, "/api/conversations/direct/titles"))).EnumerateArray(), x => x.GetProperty("conversationId").GetGuid() == id);
         Assert.Contains((await Json(await b.Send(HttpMethod.Get, "/api/conversations"))).EnumerateArray(), c => c.GetProperty("id").GetGuid() == id);
         Assert.Equal(HttpStatusCode.OK, (await b.Send(HttpMethod.Post, "/api/conversations/direct", new { targetUserId = aid })).StatusCode);
         Assert.Equal(HttpStatusCode.NoContent, (await b.Send(HttpMethod.Delete, $"/api/blocks/{aid}")).StatusCode);
