@@ -11,6 +11,7 @@
 @inject AuthState Auth
 @inject ApiRequestSender RequestSender
 @inject IFriendshipApiClient FriendshipApi
+@inject IGroupApiClient GroupApi
 @inject HttpClient Http
 
 <PageTitle>Tin nhắn · chat_zalo</PageTitle>
@@ -53,10 +54,12 @@
             <main class="chat-main">
                 @if (session.State.SelectedId is Guid id && session.State.Active is { } active)
                 {
-                    <div class="chat-topbar"><span class="avatar">@ConversationTitle(id)[..1].ToUpperInvariant()</span><div><h2>@ConversationTitle(id)</h2><small class="muted">Trò chuyện cá nhân · Tin nhắn được lưu trên hệ thống</small></div></div>
+                    <div class="chat-topbar"><span class="avatar">@ConversationTitle(id)[..1].ToUpperInvariant()</span><div><h2>@ConversationTitle(id)</h2><small class="muted">@(IsGroup(id) ? (membersFor == id ? $"Nhóm · {senderNames.Count} thành viên · " : "Nhóm · ") : "Trò chuyện cá nhân · ")Tin nhắn được lưu trên hệ thống</small></div>@if (IsGroup(id)) { <a class="btn btn-sm" href="/groups/@id">Xem nhóm</a> }</div>
                     @if (active.Loading) { <p class="chat-loading" role="status">Đang tải tin nhắn…</p> }
                     <button class="btn btn-sm older" @onclick="LoadOlderAsync" disabled="@(!active.HasOlder || active.Loading)">Tải tin nhắn cũ hơn</button>
-                    <MessageList Items="active.Messages" CurrentUserId="Auth.CurrentUser!.Id" />
+                    <MessageList Items="active.Messages" CurrentUserId="Auth.CurrentUser!.Id"
+                                 SenderNames="@(IsGroup(id) ? senderNames : null)"
+                                 UnknownSenderLabel="@(IsGroup(id) ? "Thành viên đã rời nhóm" : "Đối phương")" />
                     @if (errors.TryGetValue(id, out var sendError)) { <p class="alert alert-error" role="alert">@sendError</p> }
                     @if (sendPermissions.TryGetValue(id, out var canSend) && !canSend) { <p class="muted">Bạn cần đang là bạn bè và bỏ chặn để gửi tin nhắn.</p> }
                     <ChatComposer @key="id" Body="@active.Draft" BodyChanged="value => active.Draft = value"
@@ -75,10 +78,23 @@
 </div>
 
 @code {
+    // Ticket yêu cầu tải 10 tin mỗi lần (cả chat 1-1 lẫn nhóm), cuộn lên để tải thêm
+    private const int PageSize = 10;
+
+    // Mở thẳng một hội thoại từ địa chỉ /chat?c={id} (ví dụ nút "Nhắn tin" ở trang nhóm)
+    [Parameter]
+    [SupplyParameterFromQuery(Name = "c")]
+    public Guid? OpenConversationId { get; set; }
+
     private ChatSession? session;
     private ChatHubClient? hub;
     private ConversationsApiClient? conversationsApi;
+    private GroupAwareConversations? groupConversations;
     private ConversationDiscovery? discovery;
+
+    // Tên các thành viên của nhóm đang xem, để hiện "ai gửi" trong tin nhắn nhóm
+    private Dictionary<Guid, string> senderNames = [];
+    private bool IsGroup(Guid id) => conversations.Any(c => c.Id == id && c.Kind == "Group");
     private readonly CancellationTokenSource discoveryLifetime = new();
     private Task? discoveryLoop;
     private int conversationRevision;
@@ -107,6 +123,27 @@
             }
         }
         catch (Exception ex) { if (!disposed) error = "Chưa tải được tên hội thoại: " + Describe(ex); }
+
+        // Tên các nhóm lấy từ GroupAwareConversations (API tiêu đề chỉ có chat 1-1)
+        if (!disposed && groupConversations is not null)
+            foreach (var (groupId, name) in groupConversations.GroupNames)
+                conversationTitles[groupId] = name;
+    }
+
+    private Guid? membersFor;   // nhóm mà senderNames đang chứa tên thành viên
+
+    // Tải tên thành viên của nhóm để hiện người gửi. force = true khi có tin mới (có thể có người vừa vào/rời nhóm)
+    private async Task EnsureMembersAsync(Guid id, bool force = false)
+    {
+        if (!IsGroup(id) || (!force && membersFor == id)) return;
+        try
+        {
+            var members = await GroupApi.GetMembersAsync(id);
+            if (disposed || session?.State.SelectedId != id) return;
+            senderNames = members.ToDictionary(m => m.UserId, m => m.DisplayName);
+            membersFor = id;
+        }
+        catch (ApiException) { /* chưa có tên thì tin nhắn hiện nhãn chung, không làm hỏng chat */ }
     }
     private List<FriendshipDto> friends = [];
     private Guid targetFriend;
@@ -119,13 +156,14 @@
     {
         Auth.OnChange += OnAuthChanged;
         conversationsApi = new ConversationsApiClient(RequestSender);
-        session = new ChatSession(new MessagesApiClient(RequestSender));
+        session = new ChatSession(new MessagesApiClient(RequestSender, PageSize), PageSize);
         hub = new ChatHubClient(Http);
         hub.ConversationChanged += OnChanged;
         hub.Reconnected += OnReconnected;
         hub.StatusChanged += OnConnectionChanged;
         hub.SubscriptionFailed += OnSubscriptionFailed;
-        discovery = new ConversationDiscovery(conversationsApi, hub.JoinAsync);
+        groupConversations = new GroupAwareConversations(conversationsApi, GroupApi);
+        discovery = new ConversationDiscovery(groupConversations, hub.JoinAsync);
         discovery.SubscriptionFailed += OnSubscriptionFailed;
         try { if (!Auth.IsInitialized) await Auth.InitializeAsync(); }
         catch (Exception ex) { error = Describe(ex); }
@@ -149,6 +187,8 @@
             conversationTitles.Clear();
             conversationPeers.Clear();
             sendPermissions.Clear();
+            senderNames.Clear();
+            membersFor = null;
             friends.Clear();
             errors.Clear();
             if (hub is not null) await hub.DisposeAsync();
@@ -183,7 +223,10 @@
         conversations = conversations.Select(c => c.Id == change.ConversationId
             ? c with { LastMessageSeq = Math.Max(c.LastMessageSeq, change.LatestSeq) } : c).ToList();
         if (session.State.SelectedId == change.ConversationId)
+        {
             await RunAsync(change.ConversationId, () => session.SyncAsync(change.ConversationId));
+            await EnsureMembersAsync(change.ConversationId, force: true);
+        }
         if (!disposed) StateHasChanged();
     });
 
@@ -209,9 +252,14 @@
                     {
                         var items = await discovery.RefreshAsync(ct);
                         if (disposed || ct.IsCancellationRequested || !Auth.IsAuthenticated || revision != conversationRevision) return;
-                        items = items.Where(c => c.Kind == "Direct").ToList();
+                        items = items.Where(c => c.Kind is "Direct" or "Group").ToList();
+                        // Nhóm đang xem vừa biến mất khỏi danh sách (rời nhóm, bị xóa, nhóm giải tán): phải ghi nhận
+                        // TRƯỚC khi cập nhật danh sách, để báo cho người dùng biết vì sao chat chuyển sang hội thoại khác
+                        var lostGroup = session.State.SelectedId is Guid watching && IsGroup(watching) && !items.Any(c => c.Id == watching);
                         conversations = items;
                         await RefreshTitlesAsync();
+                        if (lostGroup)
+                            error = "Bạn không còn trong nhóm đang xem (đã rời nhóm, bị xóa khỏi nhóm hoặc nhóm đã giải tán).";
                         if (session.State.SelectedId is Guid selected && !items.Any(c => c.Id == selected))
                             session.State.SelectedId = null;
                         if (session.State.SelectedId is Guid id)
@@ -253,7 +301,7 @@
             conversationRevision++;
             var items = await discovery.RefreshAsync(discoveryLifetime.Token);
             if (disposed || !Auth.IsAuthenticated) return;
-            conversations = items.Where(c => c.Kind == "Direct").ToList();
+            conversations = items.Where(c => c.Kind is "Direct" or "Group").ToList();
             await RefreshTitlesAsync();
             try { friends = await FriendshipApi.GetFriendsAsync(); }
             catch (Exception ex) { error = "Chưa tải được danh sách bạn bè: " + Describe(ex); }
@@ -269,7 +317,12 @@
                 catch (Exception ex) { error = "Realtime chưa sẵn sàng: " + Describe(ex); }
             }
             if (disposed || !Auth.IsAuthenticated) return;
-            if (owner.State.SelectedId is Guid id) await RunAsync(id, () => owner.SyncAsync(id));
+            if (owner.State.SelectedId is Guid id)
+            {
+                await RunAsync(id, () => owner.SyncAsync(id));
+                await EnsureMembersAsync(id);
+            }
+            else if (OpenConversationId is Guid wanted && conversations.Any(c => c.Id == wanted)) await SelectAsync(wanted);
             else if (conversations.Count > 0) await SelectAsync(conversations[0].Id);
         }
         catch (OperationCanceledException) when (discoveryLifetime.IsCancellationRequested) { }
@@ -318,6 +371,7 @@
         var owner = session;
         owner.State.SelectedId = id;
         await RunAsync(id, () => owner.SyncAsync(id));
+        await EnsureMembersAsync(id);
     }
 
     private Task LoadOlderAsync()
@@ -342,6 +396,9 @@
             // Bị chặn (hoặc đã chặn người kia khi gửi): chỉ báo lỗi cho hội thoại này, không reset cả phiên chat
             if (ex is ApiException { StatusCode: 403, Code: "CONVERSATION_ACCESS_DENIED" })
                 errors[id] = "Bạn không thể gửi hoặc xem tin nhắn trong hội thoại này vì một trong hai người đã chặn người kia.";
+            // Nhóm: đã rời, bị xóa khỏi nhóm hoặc nhóm đã giải tán. Cũng chỉ báo lỗi hội thoại này
+            else if (ex is ApiException { StatusCode: 403, Code: "GROUP_ACCESS_DENIED" })
+                errors[id] = "Bạn không còn quyền trong nhóm này (đã rời nhóm, bị xóa khỏi nhóm hoặc nhóm đã giải tán).";
             else if (ex is ApiException { StatusCode: 401 or 403 })
             {
                 owner?.Reset();

@@ -2,7 +2,8 @@ using Chat.Client.Models;
 using Chat.Client.Services;
 namespace Chat.Client.State;
 
-public sealed class ChatSession(IChatMessages api)
+// pageSize phải bằng số tin mỗi lần của MessagesApiClient, vì "đủ pageSize tin" nghĩa là có thể còn tin cũ hơn
+public sealed class ChatSession(IChatMessages api, int pageSize = 20)
 {
     public ChatState State { get; } = new();
     private int generation;
@@ -25,7 +26,7 @@ public sealed class ChatSession(IChatMessages api)
                 if (!IsCurrent(id, state, version)) return;
                 state.Merge(id, latest);
                 state.SyncedSeq = latest.Where(m => m.ConversationId == id).Select(m => m.Seq).DefaultIfEmpty().Max();
-                state.HasOlder = latest.Count == 20;
+                state.HasOlder = latest.Count == pageSize;
                 state.Initialized = true;
             }
             while (IsCurrent(id, state, version))
@@ -55,7 +56,7 @@ public sealed class ChatSession(IChatMessages api)
             var batch = await api.GetOlderAsync(id, before);
             if (!IsCurrent(id, state, version)) return;
             state.Merge(id, batch);
-            state.HasOlder = batch.Count == 20;
+            state.HasOlder = batch.Count == pageSize;
         }
         finally { state.Loading = false; state.Gate.Release(); }
     }

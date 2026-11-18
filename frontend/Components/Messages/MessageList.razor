@@ -4,7 +4,7 @@
     @foreach (var message in Items)
     {
         <li @key="message.Id" class="@(message.SenderUserId == CurrentUserId ? "mine" : "")">
-            <strong>@(message.SenderUserId == CurrentUserId ? "Bạn" : "Đối phương")</strong>
+            <strong>@SenderLabel(message)</strong>
             <p>@message.Body</p><small>#@message.Seq · @message.CreatedAt.ToLocalTime().ToString("HH:mm")</small>
         </li>
     }
@@ -12,4 +12,20 @@
 @code {
     [Parameter] public IReadOnlyList<MessageResponse> Items { get; set; } = [];
     [Parameter] public Guid CurrentUserId { get; set; }
+
+    // Tên người gửi theo mã người dùng (dùng cho chat nhóm, nơi có nhiều người gửi)
+    [Parameter] public IReadOnlyDictionary<Guid, string>? SenderNames { get; set; }
+
+    // Hiện khi không biết tên người gửi: chat 1-1 là "Đối phương", chat nhóm là người đã rời nhóm
+    [Parameter] public string UnknownSenderLabel { get; set; } = "Đối phương";
+
+    private string SenderLabel(MessageResponse message)
+    {
+        if (message.SenderUserId == CurrentUserId)
+            return "Bạn";
+
+        return SenderNames is not null && SenderNames.TryGetValue(message.SenderUserId, out var name)
+            ? name
+            : UnknownSenderLabel;
+    }
 }

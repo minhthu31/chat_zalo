@@ -12,7 +12,7 @@ public sealed class ConversationDiscovery(IChatConversations api, Func<Guid, Tas
         await gate.WaitAsync(ct);
         try
         {
-            var conversations = (await api.GetAsync().WaitAsync(ct)).Where(c => c.Kind == "Direct").ToList();
+            var conversations = (await api.GetAsync().WaitAsync(ct)).Where(c => c.Kind is "Direct" or "Group").ToList();
             foreach (var conversation in conversations)
             {
                 ct.ThrowIfCancellationRequested();
