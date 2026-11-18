@@ -620,6 +620,8 @@ public sealed class PagedUsersTests
             var table = new DataTable();
             table.Columns.Add("Id", typeof(Guid));
             table.Columns.Add("AccessFailedCount", typeof(int));
+            table.Columns.Add("AvatarFileId", typeof(Guid));
+            table.Columns.Add("Bio", typeof(string));
             table.Columns.Add("ConcurrencyStamp", typeof(string));
             table.Columns.Add("CreatedAt", typeof(DateTimeOffset));
             table.Columns.Add("DisplayName", typeof(string));
@@ -641,6 +643,8 @@ public sealed class PagedUsersTests
                 table.Rows.Add(
                     user.Id,
                     user.AccessFailedCount,
+                    user.AvatarFileId.HasValue ? (object)user.AvatarFileId.Value : DBNull.Value,
+                    user.Bio,
                     (object?)user.ConcurrencyStamp ?? DBNull.Value,
                     user.CreatedAt,
                     (object?)user.DisplayName ?? DBNull.Value,
