@@ -15,7 +15,7 @@ using Xunit;
 namespace Chat.Database.Tests;
 
 // Real Kestrel HTTP, Identity cookies, antiforgery, application services and PostgreSQL.
-public class ConversationsHttpPostgresTests
+public partial class ConversationsHttpPostgresTests
 {
     private sealed class Factory : WebApplicationFactory<ConversationsController>
     {
