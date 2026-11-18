@@ -1,8 +1,6 @@
 @using global::Chat.Client.Models
 @using global::Chat.Client.Services
 @inject IGroupApiClient GroupApi
-@inject NavigationManager Nav
-@inject IJSRuntime JS
 
 @if (Candidates.Count == 0)
 {
@@ -34,17 +32,9 @@ else
         </button>
     </div>
 
-    @if (_sentLink is not null)
+    @if (_sentTo is not null)
     {
-        <p class="alert alert-success">
-            Đã gửi đề nghị cho <strong>@_sentTo</strong>. Hiện hệ thống chưa tự báo cho người này,
-            hãy gửi liên kết bên dưới để họ mở và bấm Đồng ý hoặc Từ chối.
-        </p>
-
-        <div class="transfer-row">
-            <input readonly value="@_sentLink" aria-label="Liên kết đề nghị" />
-            <button type="button" class="btn btn-sm" @onclick="CopyAsync">@(_copied ? "Đã chép" : "Sao chép")</button>
-        </div>
+        <p class="alert alert-success">Đã gửi đề nghị cho @_sentTo.</p>
     }
 }
 
@@ -60,9 +50,7 @@ else
 
     private Guid _target;
     private bool _busy;
-    private bool _copied;
     private string? _error;
-    private string? _sentLink;
     private string? _sentTo;
 
     // Chỉ chọn được thành viên thường (không phải chính mình hay Admin)
@@ -76,8 +64,7 @@ else
 
         _busy = true;
         _error = null;
-        _sentLink = null;
-        _copied = false;
+        _sentTo = null;
 
         try
         {
@@ -90,11 +77,9 @@ else
                 return;
             }
 
-            var request = await GroupApi.ProposeAdminTransferAsync(GroupId, _target);
+            await GroupApi.ProposeAdminTransferAsync(GroupId, _target);
 
-            // Liên kết dẫn tới trang nhóm kèm mã đề nghị; người được chọn mở ra sẽ thấy nút Đồng ý / Từ chối
             _sentTo = target.DisplayName;
-            _sentLink = Nav.ToAbsoluteUri($"/groups/{GroupId}?transfer={request.Id}").ToString();
             _target = Guid.Empty;
         }
         catch (ApiException ex)
@@ -107,19 +92,4 @@ else
         }
     }
 
-    private async Task CopyAsync()
-    {
-        if (_sentLink is null)
-            return;
-
-        try
-        {
-            await JS.InvokeVoidAsync("navigator.clipboard.writeText", _sentLink);
-            _copied = true;
-        }
-        catch (JSException)
-        {
-            // Trình duyệt không cho sao chép tự động: người dùng bôi đen và chép tay
-        }
-    }
 }

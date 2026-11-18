@@ -1,4 +1,4 @@
-﻿@page "/chat"
+@page "/chat"
 @using global::Chat.Client.Models
 @using global::Chat.Client.Services
 @using global::Chat.Client.State
@@ -59,6 +59,7 @@
                     <button class="btn btn-sm older" @onclick="LoadOlderAsync" disabled="@(!active.HasOlder || active.Loading)">Tải tin nhắn cũ hơn</button>
                     <MessageList Items="active.Messages" CurrentUserId="Auth.CurrentUser!.Id"
                                  SenderNames="@(IsGroup(id) ? senderNames : null)"
+                                 ConversationId="id" HasOlder="active.HasOlder" Loading="active.Loading" OnLoadOlder="LoadOlderAsync"
                                  UnknownSenderLabel="@(IsGroup(id) ? "Thành viên đã rời nhóm" : "Đối phương")" />
                     @if (errors.TryGetValue(id, out var sendError)) { <p class="alert alert-error" role="alert">@sendError</p> }
                     @if (sendPermissions.TryGetValue(id, out var canSend) && !canSend) { <p class="muted">Bạn cần đang là bạn bè và bỏ chặn để gửi tin nhắn.</p> }
@@ -233,7 +234,8 @@
     private Task OnReconnected() => InvokeAsync(async () =>
     {
         if (disposed || session is null || !Auth.IsAuthenticated) return;
-        if (session.State.SelectedId is Guid id) await RunAsync(id, () => session.SyncAsync(id));
+        if (session.State.SelectedId is Guid id)
+            await RunAsync(id, () => IsGroup(id) ? session.RefreshVisibleAsync(id) : session.SyncAsync(id));
         if (!disposed) StateHasChanged();
     });
 
@@ -265,7 +267,9 @@
                         if (session.State.SelectedId is Guid id)
                         {
                             // Catch messages sent before JoinConversation completed, or while the hub was offline.
-                            if (items.Any(c => c.Id == id && c.LastMessageSeq > session.State.For(id).SyncedSeq))
+                            if (IsGroup(id))
+                                await RunAsync(id, () => session.RefreshVisibleAsync(id)).WaitAsync(ct);
+                            else if (items.Any(c => c.Id == id && c.LastMessageSeq > session.State.For(id).SyncedSeq))
                                 await RunAsync(id, () => session.SyncAsync(id)).WaitAsync(ct);
                         }
                         else if (items.Count > 0) await SelectAsync(items[0].Id).WaitAsync(ct);
@@ -319,7 +323,7 @@
             if (disposed || !Auth.IsAuthenticated) return;
             if (owner.State.SelectedId is Guid id)
             {
-                await RunAsync(id, () => owner.SyncAsync(id));
+                await RunAsync(id, () => IsGroup(id) ? owner.RefreshVisibleAsync(id) : owner.SyncAsync(id));
                 await EnsureMembersAsync(id);
             }
             else if (OpenConversationId is Guid wanted && conversations.Any(c => c.Id == wanted)) await SelectAsync(wanted);
@@ -370,7 +374,7 @@
         if (disposed || session is null || !Auth.IsAuthenticated) return;
         var owner = session;
         owner.State.SelectedId = id;
-        await RunAsync(id, () => owner.SyncAsync(id));
+        await RunAsync(id, () => IsGroup(id) ? owner.RefreshVisibleAsync(id) : owner.SyncAsync(id));
         await EnsureMembersAsync(id);
     }
 

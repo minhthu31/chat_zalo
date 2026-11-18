@@ -119,6 +119,13 @@ public class FakeGroupApiClient : IGroupApiClient
     }
 
     // Bản giả cho phép "tôi" đóng vai người nhận để thử luồng đồng ý
+    public Task<List<AdminTransferDto>> GetPendingAdminTransfersAsync(Guid groupId)
+    {
+        var pending = Find(groupId).PendingTransfer;
+        return Task.FromResult(pending is not null && pending.Status == "Pending"
+            ? new List<AdminTransferDto> { Copy(pending) } : new List<AdminTransferDto>());
+    }
+
     public async Task AcceptAdminTransferAsync(Guid groupId, Guid requestId)
     {
         await Task.Delay(300);

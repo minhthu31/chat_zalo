@@ -1,4 +1,4 @@
-﻿using Chat.Client.Models;
+using Chat.Client.Models;
 namespace Chat.Client.State;
 
 public sealed class ConversationState
@@ -16,6 +16,10 @@ public sealed class ConversationState
     public SendMessageRequest? Pending { get; internal set; }
     internal SemaphoreSlim Gate { get; } = new(1, 1);
 
+    public void Replace(Guid id, IEnumerable<MessageResponse> incoming)
+    {
+        messages.Clear(); Merge(id, incoming);
+    }
     public void Merge(Guid conversationId, IEnumerable<MessageResponse> incoming)
     {
         var ids = messages.Values.Select(m => m.Id).ToHashSet();

@@ -13,6 +13,7 @@ public interface IGroupApiClient
     Task RemoveMemberAsync(Guid groupId, Guid userId);                            // DELETE /api/conversations/{id}/members/{u}  -> 204 (Admin)
     Task LeaveAsync(Guid groupId);                                                // POST   /api/conversations/{id}/leave        -> 204
     Task<AdminTransferDto> ProposeAdminTransferAsync(Guid groupId, Guid targetUserId); // POST .../admin-transfer                -> 202
+    Task<List<AdminTransferDto>> GetPendingAdminTransfersAsync(Guid groupId);
     Task AcceptAdminTransferAsync(Guid groupId, Guid requestId);                  // POST   .../admin-transfer/{r}/accept        -> 204
     Task RejectAdminTransferAsync(Guid groupId, Guid requestId);                  // POST   .../admin-transfer/{r}/reject        -> 204
     Task DisbandAsync(Guid groupId);                                              // DELETE /api/conversations/{id}              -> 204 (Admin)

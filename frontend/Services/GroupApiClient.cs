@@ -58,6 +58,9 @@ public class GroupApiClient : IGroupApiClient
         _api.SendAsync<AdminTransferDto>(HttpMethod.Post, $"api/conversations/{groupId}/admin-transfer",
             new AdminTransferRequest { TargetUserId = targetUserId });
 
+    public Task<List<AdminTransferDto>> GetPendingAdminTransfersAsync(Guid groupId) =>
+        _api.SendAsync<List<AdminTransferDto>>(HttpMethod.Get, $"api/conversations/{groupId}/admin-transfer");
+
     public Task AcceptAdminTransferAsync(Guid groupId, Guid requestId) =>
         _api.SendAsync(HttpMethod.Post, $"api/conversations/{groupId}/admin-transfer/{requestId}/accept");
 

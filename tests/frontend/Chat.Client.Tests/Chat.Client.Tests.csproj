@@ -11,6 +11,9 @@
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.0.2" PrivateAssets="all" />
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="10.0.0" />
+    <Compile Include="../../../frontend/Models/GroupModels.cs" Link="Models/GroupModels.cs" />
+    <Compile Include="../../../frontend/Services/IGroupApiClient.cs" Link="Services/IGroupApiClient.cs" />
+    <Compile Include="../../../frontend/Services/GroupApiClient.cs" Link="Services/GroupApiClient.cs" />
     <Compile Include="../../../frontend/Models/Conversations/ConversationDto.cs" Link="Models/ConversationDto.cs" />
     <Compile Include="../../../frontend/Models/Messages/MessageDtos.cs" Link="Models/MessageDtos.cs" />
     <Compile Include="../../../frontend/Models/AuthModels.cs" Link="Models/AuthModels.cs" />

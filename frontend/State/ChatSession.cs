@@ -44,6 +44,46 @@ public sealed class ChatSession(IChatMessages api, int pageSize = 20)
         finally { state.Loading = false; state.Gate.Release(); }
     }
 
+    // Re-query the loaded window: Blocks may change without new message seqs.
+    public async Task RefreshVisibleAsync(Guid id)
+    {
+        var state = State.For(id);
+        var version = generation;
+        await state.Gate.WaitAsync();
+        try
+        {
+            if (!IsCurrent(id, state, version)) return;
+            state.Loading = true;
+            var first = state.FirstSeq;
+            var complete = state.Initialized && !state.HasOlder;
+            var all = await api.GetLatestAsync(id);
+            var batch = all.ToList();
+            while (batch.Count == pageSize && batch.Count > 0
+                && (complete || (first.HasValue && batch.Min(m => m.Seq) > first.Value)))
+            {
+                var cursor = batch.Min(m => m.Seq);
+                batch = await api.GetOlderAsync(id, cursor);
+                if (batch.Any(m => m.Seq >= cursor))
+                    throw new InvalidOperationException("History cursor did not advance.");
+                all.AddRange(batch);
+            }
+            if (!IsCurrent(id, state, version)) return;
+            state.Replace(id, all);
+            state.SyncedSeq = all.Where(m => m.ConversationId == id).Select(m => m.Seq).DefaultIfEmpty().Max();
+            state.HasOlder = batch.Count == pageSize;
+            state.Initialized = true;
+        }
+        catch (ApiException ex) when (ex.StatusCode is 401 or 403)
+        {
+            if (IsCurrent(id, state, version))
+            {
+                state.Replace(id, []); state.Initialized = false; state.HasOlder = false; state.SyncedSeq = 0;
+            }
+            throw;
+        }
+        finally { state.Loading = false; state.Gate.Release(); }
+    }
+
     public async Task LoadOlderAsync(Guid id)
     {
         var state = State.For(id);
