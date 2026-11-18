@@ -58,5 +58,13 @@ public class AuthState
         }
     }
 
+    // Chỉ xóa user ở phía FE, KHÔNG gọi API. Dùng khi backend đã tự đăng xuất phiên rồi
+    // (ví dụ đổi mật khẩu xong). Nếu gọi LogoutAsync lúc này, server sẽ trả 401 vì không còn phiên.
+    public void ClearSession()
+    {
+        CurrentUser = null;
+        NotifyStateChanged();
+    }
+
     private void NotifyStateChanged() => OnChange?.Invoke();
 }

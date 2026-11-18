@@ -1,0 +1,95 @@
+@using global::Chat.Client.Models
+@using global::Chat.Client.Services
+@inject IGroupApiClient GroupApi
+
+@if (Candidates.Count == 0)
+{
+    <p class="muted">Nhóm chưa có thành viên nào khác để chuyển quyền Admin.</p>
+}
+else
+{
+    <p class="muted">
+        Chọn một thành viên để đề nghị họ làm Admin. Quyền chỉ đổi khi người đó <strong>đồng ý</strong>:
+        bạn sẽ trở thành thành viên thường, người được chọn trở thành Admin.
+    </p>
+
+    @if (_error is not null)
+    {
+        <p role="alert" class="alert alert-error">@_error</p>
+    }
+
+    <div class="transfer-row">
+        <select @bind="_target" disabled="@_busy" aria-label="Chọn thành viên">
+            <option value="@Guid.Empty">Chọn thành viên...</option>
+            @foreach (var member in Candidates)
+            {
+                <option value="@member.UserId">@member.DisplayName (@member.Username)</option>
+            }
+        </select>
+
+        <button type="button" class="btn btn-primary" disabled="@(_busy || _target == Guid.Empty)" @onclick="ProposeAsync">
+            @(_busy ? "Đang gửi..." : "Gửi đề nghị")
+        </button>
+    </div>
+
+    @if (_sentTo is not null)
+    {
+        <p class="alert alert-success">Đã gửi đề nghị cho @_sentTo.</p>
+    }
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public Guid GroupId { get; set; }
+
+    [Parameter, EditorRequired]
+    public IReadOnlyList<GroupMemberDto> Members { get; set; } = Array.Empty<GroupMemberDto>();
+
+    [Parameter]
+    public Guid? CurrentUserId { get; set; }
+
+    private Guid _target;
+    private bool _busy;
+    private string? _error;
+    private string? _sentTo;
+
+    // Chỉ chọn được thành viên thường (không phải chính mình hay Admin)
+    private List<GroupMemberDto> Candidates =>
+        Members.Where(m => !m.IsAdmin && m.UserId != CurrentUserId).ToList();
+
+    private async Task ProposeAsync()
+    {
+        if (_busy || _target == Guid.Empty)
+            return;
+
+        _busy = true;
+        _error = null;
+        _sentTo = null;
+
+        try
+        {
+            // Người được chọn có thể vừa bị xóa khỏi nhóm ở nơi khác: báo lỗi thay vì để chương trình sập
+            var target = Members.FirstOrDefault(m => m.UserId == _target);
+            if (target is null)
+            {
+                _error = "Người này không còn trong nhóm. Vui lòng chọn lại.";
+                _target = Guid.Empty;
+                return;
+            }
+
+            await GroupApi.ProposeAdminTransferAsync(GroupId, _target);
+
+            _sentTo = target.DisplayName;
+            _target = Guid.Empty;
+        }
+        catch (ApiException ex)
+        {
+            _error = GroupErrors.ToMessage(ex.Code);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+}

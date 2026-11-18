@@ -45,6 +45,9 @@ jobs:
           --no-restore --configuration Release
           --logger trx --results-directory "${{ github.workspace }}/artifacts/ci/frontend"
 
+      - name: Test chat scroll behavior
+        run: node --test tests/frontend/message-history.test.mjs
+
       - name: Upload Frontend test results
         if: always()
         uses: actions/upload-artifact@v4

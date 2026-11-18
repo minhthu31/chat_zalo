@@ -216,6 +216,8 @@
     /* ----- Nút ----- */
     .btn {
         display: inline-block;
+        box-sizing: border-box; /* thẻ <a class="btn"> cũng tính cả phần đệm vào chiều rộng, không tràn khung */
+        text-align: center;
         padding: 0.6rem 1.1rem;
         border: 1px solid transparent;
         border-radius: 10px;
@@ -357,10 +359,108 @@
         box-shadow: 0 8px 20px rgba(0, 104, 255, 0.28);
     }
 
+    /* ----- Nút Trước / Sau của danh sách tìm kiếm ----- */
+    .pager {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.75rem;
+        margin-top: 1rem;
+        font-size: 0.9rem;
+    }
+
     .actions {
         display: flex;
+        flex-wrap: wrap;
         flex-shrink: 0;
+        align-items: center;
+        justify-content: flex-end;
         gap: 0.4rem;
+    }
+
+    /* ----- Danh sách tích chọn bạn bè khi tạo nhóm ----- */
+    .check-list {
+        max-height: 240px;
+        overflow-y: auto;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: var(--field-bg);
+    }
+
+    .field label.check-item {
+        display: flex;
+        align-items: center;
+        gap: 0.65rem;
+        margin: 0;
+        padding: 0.55rem 0.75rem;
+        font-weight: 400;
+        cursor: pointer;
+    }
+
+    .check-item:hover {
+        background: var(--brand-soft);
+    }
+
+    .field .check-item input {
+        width: auto;
+        margin: 0;
+        cursor: pointer;
+    }
+
+    /* ----- Nhãn nhỏ: vai trò trong nhóm, "Bạn" ----- */
+    .badge {
+        display: inline-block;
+        padding: 0.15rem 0.6rem;
+        border-radius: 999px;
+        font-size: 0.78rem;
+        font-weight: 600;
+        line-height: 1.4;
+    }
+
+    .badge-admin {
+        background: var(--brand-soft);
+        color: var(--brand);
+    }
+
+    .badge-member {
+        background: var(--field-bg);
+        color: var(--muted);
+        border: 1px solid var(--border);
+    }
+
+    .badge-you {
+        margin-left: 0.35rem;
+        background: var(--success-soft);
+        color: var(--success);
+    }
+
+    .transfer-row {
+        display: flex;
+        gap: 0.5rem;
+        margin-bottom: 0.75rem;
+    }
+
+    .transfer-row select,
+    .transfer-row input {
+        flex: 1;
+        min-width: 0;
+        padding: 0.6rem 0.8rem;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: var(--field-bg);
+        color: var(--text);
+        font-size: 0.95rem;
+    }
+
+    .confirm-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+    }
+
+    .back-link {
+        margin: 0 0 0.75rem;
+        font-size: 0.92rem;
     }
 
     .profile-username {

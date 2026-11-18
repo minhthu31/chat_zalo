@@ -1,2 +1,236 @@
 @page "/groups"
-@* TODO: Thành viên được phân công triển khai giao diện GroupChat. *@
+@using System.ComponentModel.DataAnnotations
+@using Microsoft.AspNetCore.Components.Forms
+@using global::Chat.Client.Components.Auth
+@using global::Chat.Client.Models
+@using global::Chat.Client.Services
+@inject IGroupApiClient GroupApi
+@inject IFriendshipApiClient FriendshipApi
+
+<PageTitle>Nhóm · chat_zalo</PageTitle>
+
+<div class="as-root">
+    <div class="page page-narrow">
+        <UserBar />
+
+        <div class="card">
+            <h1 class="page-title">Tạo nhóm mới</h1>
+
+            <EditForm Model="_form" OnValidSubmit="CreateAsync" FormName="create-group">
+                <DataAnnotationsValidator />
+
+                <div class="field">
+                    <label for="group-name">Tên nhóm</label>
+                    <InputText id="group-name" maxlength="100" placeholder="Ví dụ: Nhóm học tập" @bind-Value="_form.Name" />
+                    <ValidationMessage For="() => _form.Name" />
+                </div>
+
+                <div class="field">
+                    <label>Chọn thành viên (bạn bè) · đã chọn @_selected.Count</label>
+
+                    @if (_friendsLoading)
+                    {
+                        <p class="muted">Đang tải danh sách bạn bè...</p>
+                    }
+                    else if (_friendsError is not null)
+                    {
+                        <p role="alert" class="alert alert-error">@_friendsError</p>
+                        <button type="button" class="btn btn-sm" @onclick="LoadFriendsAsync">Thử lại</button>
+                    }
+                    else if (_friends.Count == 0)
+                    {
+                        <p class="muted">Bạn chưa có bạn bè nào. <a href="/users/search">Tìm và kết bạn</a> trước nhé.</p>
+                    }
+                    else
+                    {
+                        <div class="check-list">
+                            @foreach (var friend in _friends)
+                            {
+                                <label class="check-item" @key="friend.UserId">
+                                    <input type="checkbox"
+                                           checked="@_selected.Contains(friend.UserId)"
+                                           @onchange="e => ToggleFriend(friend.UserId, (bool)e.Value!)" />
+                                    <span class="avatar avatar-sm">@AvatarText.From(friend.DisplayName)</span>
+                                    <span class="person-text">
+                                        <span class="person-name">@friend.DisplayName</span>
+                                        <span class="muted">@@@friend.Username</span>
+                                    </span>
+                                </label>
+                            }
+                        </div>
+                    }
+                </div>
+
+                @if (_createError is not null)
+                {
+                    <p role="alert" class="alert alert-error">@_createError</p>
+                }
+
+                @if (_createNotice is not null)
+                {
+                    <p class="alert alert-success">@_createNotice</p>
+                }
+
+                <button type="submit" class="btn btn-primary btn-block" disabled="@_creating">
+                    @(_creating ? "Đang tạo..." : "Tạo nhóm")
+                </button>
+            </EditForm>
+        </div>
+
+        <div class="card">
+            <h2 class="section-title">Nhóm của bạn (@_groups.Count)</h2>
+
+            @if (_groupsLoading)
+            {
+                <p class="muted center">Đang tải...</p>
+            }
+            else if (_groupsError is not null)
+            {
+                <p role="alert" class="alert alert-error">@_groupsError</p>
+                <button type="button" class="btn btn-primary btn-block" @onclick="LoadGroupsAsync">Thử lại</button>
+            }
+            else if (_groups.Count == 0)
+            {
+                <p class="muted">Bạn chưa tham gia nhóm nào.</p>
+            }
+            else
+            {
+                @foreach (var group in _groups)
+                {
+                    <div class="list-item" @key="group.Id">
+                        <span class="person">
+                            <span class="avatar">@AvatarText.From(group.Name)</span>
+                            <span class="person-text">
+                                <a class="person-name" href="/groups/@group.Id">@group.Name</a>
+                            </span>
+                        </span>
+
+                        <span class="actions">
+                            <a class="btn btn-sm" href="/groups/@group.Id">Xem</a>
+                        </span>
+                    </div>
+                }
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    private readonly GroupInput _form = new();
+
+    private List<FriendshipDto> _friends = new();
+    private readonly HashSet<Guid> _selected = new();
+    private List<GroupDto> _groups = new();
+
+    private bool _friendsLoading = true;
+    private bool _groupsLoading = true;
+    private bool _creating;
+
+    private string? _friendsError;
+    private string? _groupsError;
+    private string? _createError;
+    private string? _createNotice;
+
+    // Mở trang là tải song song bạn bè (để chọn) và nhóm đã có
+    protected override async Task OnInitializedAsync()
+    {
+        await Task.WhenAll(LoadFriendsAsync(), LoadGroupsAsync());
+    }
+
+    private async Task LoadFriendsAsync()
+    {
+        _friendsLoading = true;
+        _friendsError = null;
+
+        try
+        {
+            _friends = await FriendshipApi.GetFriendsAsync();
+        }
+        catch (ApiException ex)
+        {
+            _friendsError = FriendshipErrors.ToMessage(ex.Code);
+        }
+        finally
+        {
+            _friendsLoading = false;
+        }
+    }
+
+    private async Task LoadGroupsAsync()
+    {
+        _groupsLoading = true;
+        _groupsError = null;
+
+        try
+        {
+            _groups = await GroupApi.ListAsync();
+        }
+        catch (ApiException ex)
+        {
+            _groupsError = GroupErrors.ToMessage(ex.Code);
+        }
+        finally
+        {
+            _groupsLoading = false;
+        }
+    }
+
+    // Tích vào thì thêm vào tập hợp, bỏ tích thì lấy ra
+    private void ToggleFriend(Guid userId, bool isChecked)
+    {
+        _createError = null; // người dùng đang sửa lựa chọn nên bỏ lỗi cũ
+
+        if (isChecked)
+            _selected.Add(userId);
+        else
+            _selected.Remove(userId);
+    }
+
+    private async Task CreateAsync()
+    {
+        if (_creating)
+            return;
+
+        _createError = null;
+        _createNotice = null;
+
+        // Hợp đồng: cần ít nhất 1 người bạn ngoài chính mình
+        if (_selected.Count == 0)
+        {
+            _createError = "Hãy chọn ít nhất 1 người bạn để tạo nhóm.";
+            return;
+        }
+
+        _creating = true;
+
+        try
+        {
+            var created = await GroupApi.CreateAsync(new CreateGroupRequest
+            {
+                Name = _form.Name.Trim(),
+                MemberIds = _selected.ToList()
+            });
+
+            _createNotice = $"Đã tạo nhóm \"{created.Name}\".";
+            _form.Name = "";
+            _selected.Clear();
+
+            await LoadGroupsAsync();
+        }
+        catch (ApiException ex)
+        {
+            _createError = GroupErrors.ToMessage(ex.Code);
+        }
+        finally
+        {
+            _creating = false;
+        }
+    }
+
+    private class GroupInput
+    {
+        [Required(ErrorMessage = "Vui lòng nhập tên nhóm.")]
+        [StringLength(100, ErrorMessage = "Tên nhóm tối đa 100 ký tự.")]
+        public string Name { get; set; } = "";
+    }
+}

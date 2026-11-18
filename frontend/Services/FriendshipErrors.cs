@@ -14,6 +14,8 @@ public static class FriendshipErrors
             => "Trạng thái đã thay đổi, vui lòng tải lại.",
         "FRIEND_REQUEST_RECIPIENT_ONLY" or "FRIEND_REQUEST_SENDER_ONLY"
             => "Bạn không có quyền thực hiện thao tác này.",
+        "SELF_BLOCK_NOT_ALLOWED" => "Bạn không thể tự chặn chính mình.",
+        "NOT_FOUND" => "Không tìm thấy người dùng.",
         "UNAUTHORIZED" => "Bạn cần đăng nhập.",
         "INVALID_CSRF_TOKEN" => "Phiên làm việc hết hạn, vui lòng tải lại trang.",
         "NETWORK_ERROR" => "Không kết nối được máy chủ.",

@@ -1,4 +1,4 @@
-﻿using Chat.Client.Models;
+using Chat.Client.Models;
 namespace Chat.Client.State;
 
 public sealed class ConversationState
@@ -7,6 +7,7 @@ public sealed class ConversationState
     public IReadOnlyList<MessageResponse> Messages => messages.Values.ToList();
     // Do not advance this cursor from a POST response: missing messages may precede it.
     public long SyncedSeq { get; internal set; }
+    internal long? VisibilityStartSeq { get; set; }
     public long? FirstSeq => messages.Count == 0 ? null : messages.Keys.First();
     public bool Initialized { get; internal set; }
     public bool HasOlder { get; internal set; }
@@ -16,6 +17,10 @@ public sealed class ConversationState
     public SendMessageRequest? Pending { get; internal set; }
     internal SemaphoreSlim Gate { get; } = new(1, 1);
 
+    public void Replace(Guid id, IEnumerable<MessageResponse> incoming)
+    {
+        messages.Clear(); Merge(id, incoming);
+    }
     public void Merge(Guid conversationId, IEnumerable<MessageResponse> incoming)
     {
         var ids = messages.Values.Select(m => m.Id).ToHashSet();

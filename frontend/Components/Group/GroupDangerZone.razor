@@ -1,0 +1,126 @@
+@using global::Chat.Client.Services
+@inject IGroupApiClient GroupApi
+@inject NavigationManager Nav
+
+@if (_error is not null)
+{
+    <p role="alert" class="alert alert-error">@_error</p>
+}
+
+@if (IsAdmin)
+{
+    <p class="muted">
+        Giải tán nhóm sẽ ngừng mọi tin nhắn mới và không ai tham gia lại được.
+        Các tin nhắn cũ không bị xóa khỏi hệ thống.
+    </p>
+
+    @if (_confirming)
+    {
+        <p class="alert alert-info">Bạn chắc chắn muốn giải tán nhóm này? Không thể hoàn tác.</p>
+
+        <div class="confirm-row">
+            <button type="button" class="btn btn-danger" disabled="@_busy" @onclick="DisbandAsync">
+                @(_busy ? "Đang giải tán..." : "Xác nhận giải tán")
+            </button>
+            <button type="button" class="btn" disabled="@_busy" @onclick="Cancel">Hủy</button>
+        </div>
+    }
+    else
+    {
+        <button type="button" class="btn btn-danger" @onclick="Ask">Giải tán nhóm</button>
+    }
+
+    <p class="hint">
+        Admin muốn rời nhóm cần chuyển quyền Admin cho thành viên khác trước.
+        Nếu nhóm chỉ còn mình bạn thì hãy giải tán nhóm.
+    </p>
+}
+else
+{
+    <p class="muted">Khi rời nhóm, bạn sẽ không còn đọc hay gửi tin nhắn trong nhóm này nữa.</p>
+
+    @if (_confirming)
+    {
+        <p class="alert alert-info">Bạn chắc chắn muốn rời nhóm này?</p>
+
+        <div class="confirm-row">
+            <button type="button" class="btn btn-danger" disabled="@_busy" @onclick="LeaveAsync">
+                @(_busy ? "Đang rời nhóm..." : "Xác nhận rời nhóm")
+            </button>
+            <button type="button" class="btn" disabled="@_busy" @onclick="Cancel">Hủy</button>
+        </div>
+    }
+    else
+    {
+        <button type="button" class="btn btn-danger" @onclick="Ask">Rời nhóm</button>
+    }
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public Guid GroupId { get; set; }
+
+    // true: hiện "Giải tán nhóm"; false: hiện "Rời nhóm"
+    [Parameter]
+    public bool IsAdmin { get; set; }
+
+    private bool _confirming;
+    private bool _busy;
+    private string? _error;
+
+    private void Ask()
+    {
+        _error = null;
+        _confirming = true;
+    }
+
+    private void Cancel() => _confirming = false;
+
+    private async Task DisbandAsync()
+    {
+        if (_busy)
+            return;
+
+        _busy = true;
+        _error = null;
+
+        try
+        {
+            await GroupApi.DisbandAsync(GroupId);
+            Nav.NavigateTo("/groups"); // nhóm không còn nữa nên về danh sách nhóm
+        }
+        catch (ApiException ex)
+        {
+            _confirming = false;
+            _error = GroupErrors.ToMessage(ex.Code);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task LeaveAsync()
+    {
+        if (_busy)
+            return;
+
+        _busy = true;
+        _error = null;
+
+        try
+        {
+            await GroupApi.LeaveAsync(GroupId);
+            Nav.NavigateTo("/groups");
+        }
+        catch (ApiException ex)
+        {
+            _confirming = false;
+            _error = GroupErrors.ToMessage(ex.Code);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

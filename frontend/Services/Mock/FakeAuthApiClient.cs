@@ -58,5 +58,21 @@ public class FakeAuthApiClient : IAuthApiClient
         return Task.CompletedTask;
     }
 
+    public async Task ChangePasswordAsync(ChangePasswordRequest request)
+    {
+        await Task.Delay(500);
+
+        if (_current is null)
+            throw new ApiException(401, "UNAUTHORIZED", "Not logged in");
+
+        var index = _accounts.FindIndex(a => a.User.Id == _current.Id);
+
+        if (_accounts[index].Password != request.CurrentPassword)
+            throw new ApiException(400, "INVALID_CURRENT_PASSWORD", "Current password is incorrect");
+
+        _accounts[index] = _accounts[index] with { Password = request.NewPassword };
+        _current = null; // giống backend thật: đổi xong phải đăng nhập lại
+    }
+
     public Task<UserResponse?> GetMeAsync() => Task.FromResult(_current);
 }

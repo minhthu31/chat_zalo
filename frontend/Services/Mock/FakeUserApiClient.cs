@@ -50,5 +50,31 @@ public class FakeUserApiClient : IUserApiClient
             .ToList();
     }
 
+    public async Task<PagedUsersResponse> SearchPagedAsync(string username, int page, int pageSize)
+    {
+        await Task.Delay(300);
+
+        if (string.IsNullOrWhiteSpace(username))
+            throw new ApiException(400, "USERNAME_REQUIRED", "Username is required");
+        if (page < 1)
+            throw new ApiException(400, "INVALID_PAGE", "Page must be >= 1");
+        if (pageSize < 1 || pageSize > 100)
+            throw new ApiException(400, "INVALID_PAGE_SIZE", "PageSize must be between 1 and 100");
+
+        var all = Directory
+            .Where(u => u.Username.Contains(username.Trim(), StringComparison.OrdinalIgnoreCase))
+            .OrderBy(u => u.Username)
+            .ToList();
+
+        return new PagedUsersResponse
+        {
+            Items = all.Skip((page - 1) * pageSize).Take(pageSize).Select(Copy).ToList(),
+            Page = page,
+            PageSize = pageSize,
+            TotalCount = all.Count,
+            TotalPages = (int)Math.Ceiling(all.Count / (double)pageSize)
+        };
+    }
+
     private static UserDto Copy(UserDto u) => new() { Id = u.Id, Username = u.Username, DisplayName = u.DisplayName };
 }
