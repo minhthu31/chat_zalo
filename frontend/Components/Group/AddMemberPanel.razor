@@ -1,0 +1,136 @@
+@using global::Chat.Client.Models
+@using global::Chat.Client.Services
+@inject IFriendshipApiClient FriendshipApi
+@inject IGroupApiClient GroupApi
+
+@if (_loading)
+{
+    <p class="muted">Đang tải danh sách bạn bè...</p>
+}
+else if (_loadError is not null)
+{
+    <p role="alert" class="alert alert-error">@_loadError</p>
+    <button type="button" class="btn btn-sm" @onclick="LoadFriendsAsync">Thử lại</button>
+}
+else
+{
+    @if (_actionError is not null)
+    {
+        <p role="alert" class="alert alert-error">@_actionError</p>
+    }
+
+    @if (_notice is not null)
+    {
+        <p class="alert alert-success">@_notice</p>
+    }
+
+    var candidates = Candidates();
+
+    @if (_friends.Count == 0)
+    {
+        <p class="muted">Bạn chưa có bạn bè nào để thêm. <a href="/users/search">Tìm và kết bạn</a> trước nhé.</p>
+    }
+    else if (candidates.Count == 0)
+    {
+        <p class="muted">Tất cả bạn bè của bạn đã ở trong nhóm này.</p>
+    }
+
+    @foreach (var friend in candidates)
+    {
+        <div class="list-item" @key="friend.UserId">
+            <span class="person">
+                <span class="avatar">@AvatarText.From(friend.DisplayName)</span>
+
+                <span class="person-text">
+                    <span class="person-name">@friend.DisplayName</span>
+                    <span class="muted">@@@friend.Username</span>
+                </span>
+            </span>
+
+            <span class="actions">
+                <button type="button"
+                        class="btn btn-primary btn-sm"
+                        disabled="@_busy"
+                        @onclick="() => AddAsync(friend)">
+                    Thêm
+                </button>
+            </span>
+        </div>
+    }
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public Guid GroupId { get; set; }
+
+    // Thành viên hiện có của nhóm, để loại họ ra khỏi danh sách có thể thêm
+    [Parameter, EditorRequired]
+    public IReadOnlyList<GroupMemberDto> Members { get; set; } = Array.Empty<GroupMemberDto>();
+
+    // Báo trang cha tải lại danh sách thành viên sau khi thêm xong
+    [Parameter]
+    public EventCallback OnAdded { get; set; }
+
+    private List<FriendshipDto> _friends = new();
+
+    private bool _loading = true;
+    private bool _busy;
+
+    private string? _loadError;
+    private string? _actionError;
+    private string? _notice;
+
+    protected override Task OnInitializedAsync() => LoadFriendsAsync();
+
+    private async Task LoadFriendsAsync()
+    {
+        _loading = true;
+        _loadError = null;
+
+        try
+        {
+            _friends = await FriendshipApi.GetFriendsAsync();
+        }
+        catch (ApiException ex)
+        {
+            _loadError = FriendshipErrors.ToMessage(ex.Code);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    // Bạn bè mà chưa có trong nhóm
+    private List<FriendshipDto> Candidates() =>
+        _friends.Where(f => Members.All(m => m.UserId != f.UserId)).ToList();
+
+    private async Task AddAsync(FriendshipDto friend)
+    {
+        if (_busy)
+            return;
+
+        _busy = true;
+        _actionError = null;
+        _notice = null;
+
+        try
+        {
+            await GroupApi.AddMemberAsync(GroupId, friend.UserId);
+            _notice = $"Đã thêm {friend.DisplayName} vào nhóm.";
+            await OnAdded.InvokeAsync();
+        }
+        catch (ApiException ex)
+        {
+            _actionError = GroupErrors.ToMessage(ex.Code);
+
+            // Người này có thể đã được thêm từ nơi khác: đồng bộ lại danh sách
+            if (ex.Code == "ALREADY_GROUP_MEMBER")
+                await OnAdded.InvokeAsync();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

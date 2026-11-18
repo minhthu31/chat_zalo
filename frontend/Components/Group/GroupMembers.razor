@@ -1,0 +1,134 @@
+@using global::Chat.Client.Models
+@using global::Chat.Client.Services
+@inject IGroupApiClient GroupApi
+
+@if (_error is not null)
+{
+    <p role="alert" class="alert alert-error">@_error</p>
+}
+
+@if (_notice is not null)
+{
+    <p class="alert alert-success">@_notice</p>
+}
+
+@if (Members.Count == 0)
+{
+    <p class="muted">Nhóm chưa có thành viên nào.</p>
+}
+
+@foreach (var member in Members)
+{
+    <div class="list-item" @key="member.UserId">
+        <span class="person">
+            <span class="avatar">@AvatarText.From(member.DisplayName)</span>
+
+            <span class="person-text">
+                <span class="person-name">
+                    @member.DisplayName
+                    @if (member.UserId == CurrentUserId)
+                    {
+                        <span class="badge badge-you">Bạn</span>
+                    }
+                </span>
+                <span class="muted">@@@member.Username</span>
+            </span>
+        </span>
+
+        <span class="actions">
+            <span class="badge @(member.IsAdmin ? "badge-admin" : "badge-member")">
+                @(member.IsAdmin ? "Admin" : "Thành viên")
+            </span>
+
+            @* Chỉ Admin được xóa, và không xóa được Admin hay chính mình *@
+            @if (CanRemove(member))
+            {
+                @if (_confirmingId == member.UserId)
+                {
+                    <button type="button" class="btn btn-danger btn-sm" disabled="@_busy"
+                            @onclick="() => RemoveAsync(member)">
+                        Xác nhận xóa
+                    </button>
+                    <button type="button" class="btn btn-sm" disabled="@_busy"
+                            @onclick="() => _confirmingId = null">
+                        Hủy
+                    </button>
+                }
+                else
+                {
+                    <button type="button" class="btn btn-danger btn-sm" disabled="@_busy"
+                            @onclick="() => AskRemove(member)">
+                        Xóa
+                    </button>
+                }
+            }
+        </span>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public Guid GroupId { get; set; }
+
+    // Danh sách thành viên cần hiển thị (do trang cha truyền xuống)
+    [Parameter, EditorRequired]
+    public IReadOnlyList<GroupMemberDto> Members { get; set; } = Array.Empty<GroupMemberDto>();
+
+    // Mã của người đang đăng nhập, để gắn nhãn "Bạn" vào đúng dòng
+    [Parameter]
+    public Guid? CurrentUserId { get; set; }
+
+    // Người đang xem có phải Admin không (chỉ Admin mới thấy nút Xóa)
+    [Parameter]
+    public bool CanManage { get; set; }
+
+    // Báo trang cha tải lại danh sách sau khi xóa xong
+    [Parameter]
+    public EventCallback OnChanged { get; set; }
+
+    private Guid? _confirmingId;   // người đang chờ xác nhận xóa
+    private bool _busy;
+    private string? _error;
+    private string? _notice;
+
+    private bool CanRemove(GroupMemberDto member) =>
+        CanManage && !member.IsAdmin && member.UserId != CurrentUserId;
+
+    // Bấm "Xóa" lần đầu chỉ chuyển sang bước xác nhận, chưa xóa thật
+    private void AskRemove(GroupMemberDto member)
+    {
+        _error = null;
+        _notice = null;
+        _confirmingId = member.UserId;
+    }
+
+    private async Task RemoveAsync(GroupMemberDto member)
+    {
+        if (_busy)
+            return;
+
+        _busy = true;
+        _error = null;
+        _notice = null;
+
+        try
+        {
+            await GroupApi.RemoveMemberAsync(GroupId, member.UserId);
+            _confirmingId = null;
+            _notice = $"Đã xóa {member.DisplayName} khỏi nhóm.";
+            await OnChanged.InvokeAsync();
+        }
+        catch (ApiException ex)
+        {
+            _confirmingId = null;
+            _error = GroupErrors.ToMessage(ex.Code);
+
+            // Người đó có thể đã rời nhóm từ trước: đồng bộ lại danh sách
+            await OnChanged.InvokeAsync();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

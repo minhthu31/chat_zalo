@@ -1,0 +1,66 @@
+@using global::Chat.Client.Services
+@inject IGroupApiClient GroupApi
+
+<p class="alert alert-info">
+    Bạn nhận được đề nghị trở thành <strong>Admin</strong> của nhóm này.
+    Nếu đồng ý, Admin hiện tại sẽ trở thành thành viên thường.
+</p>
+
+@if (_error is not null)
+{
+    <p role="alert" class="alert alert-error">@_error</p>
+}
+
+<div class="confirm-row">
+    <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="AcceptAsync">Đồng ý</button>
+    <button type="button" class="btn btn-danger" disabled="@_busy" @onclick="RejectAsync">Từ chối</button>
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public Guid GroupId { get; set; }
+
+    [Parameter, EditorRequired]
+    public Guid RequestId { get; set; }
+
+    // Báo trang cha đã xử lý xong (true = đồng ý, false = từ chối)
+    [Parameter]
+    public EventCallback<bool> OnResolved { get; set; }
+
+    private bool _busy;
+    private string? _error;
+
+    private Task AcceptAsync() => RespondAsync(accept: true);
+
+    private Task RejectAsync() => RespondAsync(accept: false);
+
+    private async Task RespondAsync(bool accept)
+    {
+        if (_busy)
+            return;
+
+        _busy = true;
+        _error = null;
+
+        try
+        {
+            if (accept)
+                await GroupApi.AcceptAdminTransferAsync(GroupId, RequestId);
+            else
+                await GroupApi.RejectAdminTransferAsync(GroupId, RequestId);
+
+            await OnResolved.InvokeAsync(accept);
+        }
+        catch (ApiException ex)
+        {
+            // Mã đã xử lý rồi / không dành cho bạn / không tồn tại đều hiện câu giải thích
+            _error = ex.Code == "GROUP_ACCESS_DENIED"
+                ? "Đề nghị này không dành cho bạn, hoặc bạn không còn trong nhóm."
+                : GroupErrors.ToMessage(ex.Code);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

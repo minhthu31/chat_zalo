@@ -1,0 +1,117 @@
+@using global::Chat.Client.Models
+@using global::Chat.Client.Services
+@inject IGroupApiClient GroupApi
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+
+@if (Candidates.Count == 0)
+{
+    <p class="muted">Nhóm chưa có thành viên nào khác để chuyển quyền Admin.</p>
+}
+else
+{
+    <p class="muted">
+        Chọn một thành viên để đề nghị họ làm Admin. Quyền chỉ đổi khi người đó <strong>đồng ý</strong>:
+        bạn sẽ trở thành thành viên thường, người được chọn trở thành Admin.
+    </p>
+
+    @if (_error is not null)
+    {
+        <p role="alert" class="alert alert-error">@_error</p>
+    }
+
+    <div class="transfer-row">
+        <select @bind="_target" disabled="@_busy" aria-label="Chọn thành viên">
+            <option value="@Guid.Empty">Chọn thành viên...</option>
+            @foreach (var member in Candidates)
+            {
+                <option value="@member.UserId">@member.DisplayName (@member.Username)</option>
+            }
+        </select>
+
+        <button type="button" class="btn btn-primary" disabled="@(_busy || _target == Guid.Empty)" @onclick="ProposeAsync">
+            @(_busy ? "Đang gửi..." : "Gửi đề nghị")
+        </button>
+    </div>
+
+    @if (_sentLink is not null)
+    {
+        <p class="alert alert-success">
+            Đã gửi đề nghị cho <strong>@_sentTo</strong>. Hiện hệ thống chưa tự báo cho người này,
+            hãy gửi liên kết bên dưới để họ mở và bấm Đồng ý hoặc Từ chối.
+        </p>
+
+        <div class="transfer-row">
+            <input readonly value="@_sentLink" aria-label="Liên kết đề nghị" />
+            <button type="button" class="btn btn-sm" @onclick="CopyAsync">@(_copied ? "Đã chép" : "Sao chép")</button>
+        </div>
+    }
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public Guid GroupId { get; set; }
+
+    [Parameter, EditorRequired]
+    public IReadOnlyList<GroupMemberDto> Members { get; set; } = Array.Empty<GroupMemberDto>();
+
+    [Parameter]
+    public Guid? CurrentUserId { get; set; }
+
+    private Guid _target;
+    private bool _busy;
+    private bool _copied;
+    private string? _error;
+    private string? _sentLink;
+    private string? _sentTo;
+
+    // Chỉ chọn được thành viên thường (không phải chính mình hay Admin)
+    private List<GroupMemberDto> Candidates =>
+        Members.Where(m => !m.IsAdmin && m.UserId != CurrentUserId).ToList();
+
+    private async Task ProposeAsync()
+    {
+        if (_busy || _target == Guid.Empty)
+            return;
+
+        _busy = true;
+        _error = null;
+        _sentLink = null;
+        _copied = false;
+
+        try
+        {
+            var target = Members.First(m => m.UserId == _target);
+            var request = await GroupApi.ProposeAdminTransferAsync(GroupId, _target);
+
+            // Liên kết dẫn tới trang nhóm kèm mã đề nghị; người được chọn mở ra sẽ thấy nút Đồng ý / Từ chối
+            _sentTo = target.DisplayName;
+            _sentLink = Nav.ToAbsoluteUri($"/groups/{GroupId}?transfer={request.Id}").ToString();
+            _target = Guid.Empty;
+        }
+        catch (ApiException ex)
+        {
+            _error = GroupErrors.ToMessage(ex.Code);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task CopyAsync()
+    {
+        if (_sentLink is null)
+            return;
+
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", _sentLink);
+            _copied = true;
+        }
+        catch (JSException)
+        {
+            // Trình duyệt không cho sao chép tự động: người dùng bôi đen và chép tay
+        }
+    }
+}

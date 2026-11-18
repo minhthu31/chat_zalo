@@ -1,0 +1,197 @@
+@page "/groups/{GroupId:guid}"
+@using global::Chat.Client.Components.Auth
+@using global::Chat.Client.Components.Group
+@using global::Chat.Client.Models
+@using global::Chat.Client.Services
+@using global::Chat.Client.State
+@implements IDisposable
+@inject IGroupApiClient GroupApi
+@inject AuthState Auth
+@inject NavigationManager Nav
+
+<PageTitle>@(_group?.Name ?? "Nhóm") · chat_zalo</PageTitle>
+
+<div class="as-root">
+    <div class="page page-narrow">
+        <UserBar />
+
+        <p class="back-link"><a href="/groups">← Danh sách nhóm</a></p>
+
+        @if (_loading)
+        {
+            <div class="card">
+                <p class="muted center">Đang tải...</p>
+            </div>
+        }
+        else if (_error is not null)
+        {
+            <div class="card">
+                <p role="alert" class="alert alert-error">@_error</p>
+                <button type="button" class="btn btn-primary btn-block" @onclick="LoadAsync">Thử lại</button>
+            </div>
+        }
+        else if (_group is not null)
+        {
+            <div class="card">
+                <div class="avatar avatar-lg">@AvatarText.From(_group.Name)</div>
+                <h1 class="page-title">@_group.Name</h1>
+                <p class="profile-username">
+                    @_members.Count thành viên ·
+                    Bạn là <strong>@(IsAdmin ? "Admin" : "thành viên")</strong>
+                </p>
+                <a class="btn btn-primary btn-block" href="/chat?c=@GroupId">Nhắn tin trong nhóm</a>
+            </div>
+
+            @if (_transferNotice is not null)
+            {
+                <p class="alert alert-success">@_transferNotice</p>
+            }
+
+            @* Người được đề nghị mở liên kết /groups/{id}?transfer={mã} sẽ thấy khung Đồng ý / Từ chối *@
+            @if (TransferRequestId is Guid requestId)
+            {
+                <div class="card">
+                    <h2 class="section-title">Đề nghị chuyển quyền Admin</h2>
+                    <AdminTransferResponse GroupId="GroupId" RequestId="requestId" OnResolved="HandleTransferResolvedAsync" />
+                </div>
+            }
+
+            <div class="card">
+                <h2 class="section-title">Thành viên (@_members.Count)</h2>
+                <GroupMembers GroupId="GroupId"
+                              Members="_members"
+                              CurrentUserId="Auth.CurrentUser?.Id"
+                              CanManage="IsAdmin"
+                              OnChanged="ReloadMembersAsync" />
+            </div>
+
+            <div class="card">
+                <h2 class="section-title">Thêm thành viên</h2>
+                <AddMemberPanel GroupId="GroupId" Members="_members" OnAdded="ReloadMembersAsync" />
+            </div>
+
+            @if (IsAdmin)
+            {
+                <div class="card">
+                    <h2 class="section-title">Chuyển quyền Admin</h2>
+                    <AdminTransferPanel GroupId="GroupId" Members="_members" CurrentUserId="Auth.CurrentUser?.Id" />
+                </div>
+            }
+
+            <div class="card">
+                <h2 class="section-title">@(IsAdmin ? "Quản lý nhóm" : "Rời nhóm")</h2>
+                <GroupDangerZone GroupId="GroupId" IsAdmin="IsAdmin" />
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter]
+    public Guid GroupId { get; set; }
+
+    // Mã đề nghị chuyển Admin lấy từ địa chỉ ?transfer=... (giải pháp tạm, xem ghi chú trong PR)
+    [Parameter]
+    [SupplyParameterFromQuery(Name = "transfer")]
+    public Guid? TransferRequestId { get; set; }
+
+    private string? _transferNotice;
+
+    private GroupDto? _group;
+    private List<GroupMemberDto> _members = new();
+
+    private bool _loading = true;
+    private string? _error;
+
+    // Admin hay thành viên: tìm dòng của chính mình trong danh sách thành viên
+    private bool IsAdmin =>
+        _members.Any(m => m.UserId == Auth.CurrentUser?.Id && m.IsAdmin);
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Để biết "tôi là ai" và tự vẽ lại khi AuthState có thông tin
+        Auth.OnChange += HandleAuthChanged;
+
+        if (!Auth.IsInitialized)
+        {
+            try
+            {
+                await Auth.InitializeAsync();
+            }
+            catch (ApiException)
+            {
+                // Lỗi mạng: phần tải nhóm bên dưới sẽ tự báo lỗi
+            }
+        }
+
+        await LoadAsync();
+    }
+
+    // Chuyển từ nhóm này sang nhóm khác (đổi GroupId) thì tải lại
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_group is not null && _group.Id != GroupId)
+            await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _error = null;
+
+        try
+        {
+            // Hỏi thông tin nhóm và danh sách thành viên cùng lúc
+            var groupTask = GroupApi.GetAsync(GroupId);
+            var membersTask = GroupApi.GetMembersAsync(GroupId);
+            await Task.WhenAll(groupTask, membersTask);
+
+            _group = groupTask.Result;
+            _members = membersTask.Result;
+        }
+        catch (ApiException ex)
+        {
+            _group = null;
+            _error = ex.Code switch
+            {
+                "GROUP_ACCESS_DENIED" => "Bạn không có quyền xem nhóm này, hoặc nhóm đã được giải tán.",
+                "NOT_FOUND" => "Không tìm thấy nhóm này.",
+                // BE trả mã này cả khi mã nhóm không tồn tại, nên dùng câu bao quát
+                "INVALID_CONVERSATION_KIND" => "Không tìm thấy nhóm này (hoặc đây không phải là một nhóm chat).",
+                _ => GroupErrors.ToMessage(ex.Code)
+            };
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    // Chỉ tải lại danh sách thành viên (không hiện "Đang tải" cả trang) sau khi có thay đổi
+    private async Task ReloadMembersAsync()
+    {
+        try
+        {
+            _members = await GroupApi.GetMembersAsync(GroupId);
+        }
+        catch (ApiException ex)
+        {
+            _error = GroupErrors.ToMessage(ex.Code);
+        }
+    }
+
+    // Đồng ý hoặc từ chối xong: bỏ ?transfer khỏi địa chỉ (để khung biến mất) và tải lại vai trò mới
+    private async Task HandleTransferResolvedAsync(bool accepted)
+    {
+        _transferNotice = accepted
+            ? "Bạn đã đồng ý và trở thành Admin của nhóm này."
+            : "Bạn đã từ chối đề nghị làm Admin.";
+
+        Nav.NavigateTo($"/groups/{GroupId}", replace: true);
+        await ReloadMembersAsync();
+    }
+
+    private void HandleAuthChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Auth.OnChange -= HandleAuthChanged;
+}
