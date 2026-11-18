@@ -71,7 +71,7 @@
 ## Sprint 3
 
 API/DTO: [API_CONTRACT.md](API_CONTRACT.md#sprint-3).
-DI: [SPRINT3_INTEGRATION.md](SPRINT3_INTEGRATION.md).
+DI: [Backend Program.cs](../backend/Chat.Api/Program.cs), [Frontend Program.cs](../frontend/Program.cs).
 
 ### Kế thừa Sprint 1–2
 
