@@ -578,3 +578,255 @@ AdminTransferDto: {"id":"Guid","conversationId":"Guid","fromUserId":"Guid","toUs
 - `GET /api/blocks` yêu cầu đăng nhập, trả `200 [{userId,username,displayName,createdAt}]`: chỉ danh sách người do chính người gọi chặn; không trả quan hệ chiều ngược hoặc thông tin Identity nhạy cảm. GET không cần CSRF; PUT/DELETE giữ nguyên yêu cầu CSRF và response Sprint 1.
 - `GET /api/conversations/direct/titles` yêu cầu đăng nhập, trả `200 [{conversationId,userId,username,displayName}]`: thông tin công khai của người đối thoại trong các hội thoại Direct mà người gọi còn quyền truy cập, áp dụng cùng quy tắc thành viên và Blocks như danh sách hội thoại. FE dùng displayName, nếu trống dùng username. API `GET /api/conversations` và ConversationDto hiện có giữ nguyên.
 - FE `/chat` có thanh thông tin bên phải, hủy kết bạn và chặn/bỏ chặn; `/blocks` tải trạng thái từ Backend sau khi tải lại trang. Hủy kết bạn giữ lịch sử và ngừng cho gửi tin theo quy tắc hiện có. Thanh điều hướng dùng chung cho các trang Sprint 1.
+
+---
+
+## Sprint 3
+
+### 1. Kế thừa Sprint 1–2
+
+| Phần hiện có | Sprint 3 |
+|---|---|
+| Tin nhắn có `createdAt` UTC | FE dùng để hiển thị ngày/giờ địa phương |
+| Hồ sơ cũ dùng `GET/PATCH /api/users/me`, tên tối đa 100 ký tự | Giữ API cũ; API hồ sơ mới giới hạn tên 50 ký tự |
+| `ConversationMembers` có `LastReadSeq`, `LastDeliveredSeq` | Tái sử dụng, không tạo bảng receipts riêng |
+| Messages dùng `body`, Seq và ClientMessageId | Tiếp tục dùng chung cho tin có file |
+| FE có `ApiRequestSender` xử lý Cookie/CSRF | Bổ sung multipart và download |
+| Có Friendships, Blocks, quyền nhóm và SignalR | Tái sử dụng cho Sprint 3 |
+
+Tên cũ dài hơn 50 ký tự vẫn được đọc, không tự cắt hoặc sửa.
+
+### 2. API hồ sơ và Avatar
+
+| Method | Endpoint | Thành công |
+|---|---|---|
+| GET | `/api/users/{userId}/profile` | `200 ProfileDto` |
+| PUT | `/api/users/me/profile` | `200 ProfileDto` |
+| PUT | `/api/users/me/avatar` | `200 ProfileDto` |
+| DELETE | `/api/users/me/avatar` | `204` |
+| GET | `/api/users/{userId}/avatar` | `200` ảnh; `404` nếu chưa có |
+
+Request sửa hồ sơ:
+
+```json
+{
+  "displayName": "Nguyễn Văn A",
+  "bio": "Giới thiệu"
+}
+```
+
+`ProfileDto`:
+
+```json
+{
+  "id": "Guid",
+  "username": "user01",
+  "displayName": "Nguyễn Văn A",
+  "bio": "Giới thiệu",
+  "avatarUrl": null
+}
+```
+
+Quy định:
+
+- Tên sau trim dài 1–50 ký tự; Bio tối đa 200 ký tự.
+- Avatar multipart trường `file`, hỗ trợ JPG/PNG/WebP, tối đa 2 MB.
+- Người đã đăng nhập khi tìm kiếm hoặc xem bạn bè được xem tên, Bio, Avatar.
+- Chỉ chủ tài khoản được chỉnh sửa; Backend lấy danh tính từ phiên đăng nhập.
+- Không trả Email.
+- Giữ DTO tìm kiếm cũ; FE lấy thêm hồ sơ theo ID của kết quả đang hiển thị.
+
+### 3. Tin nhắn và file
+
+Giữ nguyên API Messages cũ, bổ sung:
+
+| Method | Endpoint | Thành công |
+|---|---|---|
+| POST | `/api/conversations/{id}/attachments` | `201 AttachmentDto` |
+| POST | `/api/conversations/{id}/messages/attachments` | `201` tạo mới, `200` retry |
+| GET | `/api/conversations/{id}/messages/attachment-details?messageIds=...` | `200 AttachmentMessageDto[]` |
+| GET | `/api/attachments/{attachmentId}/content` | `200` nội dung |
+| GET | `/api/attachments/{attachmentId}/download` | `200` tải xuống |
+
+Upload dùng multipart trường `file`.
+
+Request gửi tin:
+
+```json
+{
+  "clientMessageId": "Guid",
+  "body": "Tài liệu của nhóm",
+  "attachmentIds": ["Guid"]
+}
+```
+
+`AttachmentDto`:
+
+```json
+{
+  "id": "Guid",
+  "fileName": "tai-lieu.pdf",
+  "contentType": "application/pdf",
+  "sizeBytes": 123456,
+  "contentUrl": "/api/attachments/Guid/content",
+  "downloadUrl": "/api/attachments/Guid/download"
+}
+```
+
+`AttachmentMessageDto`:
+
+```json
+{
+  "messageId": "Guid",
+  "attachments": []
+}
+```
+
+Response gửi tin là `{message, attachments}`; `message` giữ đúng cấu trúc `MessageResponse` hiện có.
+
+**Luồng tải lịch sử:**
+
+1. FE gọi Messages hiện có với `limit=10`.
+2. Lấy ID của các tin vừa nhận để gọi `attachment-details`.
+3. Ghép file vào tin bằng `messageId`.
+
+`messageIds` là danh sách Guid phân cách bằng dấu phẩy, tối đa 100 ID. Backend kiểm tra quyền từng tin; nếu có ID không được phép truy cập thì từ chối request.
+
+Quy định:
+
+- Tối đa 5 file/tin, 10 MB/file, tổng 50 MB/tin.
+- Quy ước 1 MB = 1.048.576 byte.
+- Hỗ trợ JPG, PNG, WebP, PDF, DOCX, XLSX, TXT.
+- `body` tối đa 4.000 ký tự, cho phép rỗng khi có file.
+- Dùng chung bảng Messages, Seq và cơ chế chống trùng ClientMessageId.
+- Tin chỉ có file vẫn xuất hiện trong lịch sử.
+- File thuộc người upload và đúng hội thoại; một file chỉ gắn một tin.
+- Kiểm tra quyền gửi khi upload và quyền xem tin khi xem/tải, áp dụng Blocks.
+- Kiểm tra loại file thực tế; không công khai thư mục lưu file.
+- Chỉ phát `ConversationChanged` sau khi lưu tin và liên kết file commit thành công.
+
+### 4. Thông báo từng hội thoại
+
+```text
+GET /api/conversations/{id}/notification-settings
+PUT /api/conversations/{id}/notification-settings
+```
+
+Request và response `200`:
+
+```json
+{
+  "isMuted": false
+}
+```
+
+- Mặc định `false`.
+- Lưu riêng theo người dùng và hội thoại.
+- Mute chỉ tắt âm thanh/banner; vẫn nhận và lưu tin bình thường.
+- Không thay đổi Join/Leave hoặc quyền truy cập.
+
+### 5. Đã nhận và đã xem
+
+```text
+GET /api/conversations/{id}/receipts
+PUT /api/conversations/{id}/receipts/delivered
+PUT /api/conversations/{id}/receipts/read
+```
+
+Request PUT:
+
+```json
+{
+  "seq": 120
+}
+```
+
+PUT trả `200 ReceiptDto`:
+
+```json
+{
+  "userId": "Guid",
+  "deliveredSeq": 120,
+  "readSeq": 118
+}
+```
+
+GET trả `200`:
+
+```json
+{
+  "conversationId": "Guid",
+  "items": [
+    {
+      "userId": "Guid",
+      "displayName": "B",
+      "deliveredSeq": 120,
+      "readSeq": 118
+    }
+  ]
+}
+```
+
+Quy định:
+
+- **Đã gửi:** Backend lưu thành công.
+- **Đã nhận:** thiết bị lấy được dữ liệu tin và xác nhận.
+- **Đã xem:** người nhận mở hội thoại và đọc đến tin.
+- Tái sử dụng mốc trong `ConversationMembers`.
+- Mốc chỉ tăng; cập nhật đồng thời lấy giá trị lớn nhất.
+- `readSeq ≤ deliveredSeq ≤ LastMessageSeq`; read tự nâng delivered nếu cần.
+- Không xác nhận tin chưa tồn tại hoặc không có quyền xem.
+- Không suy ra đã xem tin bị Blocks ẩn.
+- Nhóm hiển thị tên người đã xem, ví dụ **“B, C đã xem”**, không tính người gửi.
+
+### 6. SignalR
+
+Giữ Hub `/hubs/chat` và event `ConversationChanged`:
+
+```json
+{
+  "eventId": "Guid",
+  "conversationId": "Guid",
+  "latestSeq": 120
+}
+```
+
+Bổ sung event `MessageReceiptChanged`:
+
+```json
+{
+  "conversationId": "Guid",
+  "userId": "Guid",
+  "deliveredSeq": 120,
+  "readSeq": 118
+}
+```
+
+- Kiểm tra subscription, quyền nhóm và Blocks trước khi phát.
+- Chỉ phát sau commit.
+- FE bỏ qua mốc cũ, ghép tên từ API receipts.
+- Reconnect: Join lại → đồng bộ Messages bằng `afterSeq` → tải lại receipts và thiết lập thông báo.
+
+### 7. HTTP và mã lỗi
+
+Response lỗi giữ cấu trúc:
+
+```json
+{
+  "code": "INVALID_BIO",
+  "message": "Bio không được vượt quá 200 ký tự."
+}
+```
+
+| HTTP | Code |
+|---|---|
+| 400 | `INVALID_DISPLAY_NAME`, `INVALID_BIO`, `INVALID_ATTACHMENT_COUNT`, `INVALID_RECEIPT_SEQ`, `INVALID_CSRF_TOKEN` |
+| 401 | Giữ mã chưa đăng nhập hiện có |
+| 403 | Giữ mã quyền truy cập hiện có |
+| 404 | `USER_NOT_FOUND`, `ATTACHMENT_NOT_FOUND` |
+| 409 | `CLIENT_MESSAGE_ID_CONFLICT`, `ATTACHMENT_ALREADY_USED` |
+| 413 | `FILE_TOO_LARGE`, `MESSAGE_ATTACHMENTS_TOO_LARGE` |
+| 415 | `UNSUPPORTED_FILE_TYPE` |
+| 500 | `INTERNAL_ERROR` — thông báo chung, chi tiết ghi log |
+
+Cookie và CSRF áp dụng cả upload multipart.

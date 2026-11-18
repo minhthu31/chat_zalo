@@ -34,4 +34,10 @@ builder.Services.AddScoped<AuthState>();
 builder.Services.AddScoped<ChatApiClient>();
 builder.Services.AddTransient<ChatRealtimeClient>();
 
+// Sprint 3 DI: enable each registration when its interface and implementation exist.
+// builder.Services.AddScoped<IProfileApiClient, ProfileApiClient>();
+// builder.Services.AddScoped<IAttachmentApiClient, AttachmentApiClient>();
+// builder.Services.AddScoped<IConversationSettingsApiClient, ConversationSettingsApiClient>();
+// builder.Services.AddScoped<IMessageReceiptApiClient, MessageReceiptApiClient>();
+
 await builder.Build().RunAsync();

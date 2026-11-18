@@ -195,7 +195,15 @@ builder.Services.AddScoped<IConversationEventPublisher>(services =>
     services.GetRequiredService<ChatNotificationService>());
 
    builder.Services.AddGroupPermissions();
-   var app = builder.Build();
+   // Sprint 3 DI: enable each registration when its interface and implementation exist.
+// builder.Services.AddScoped<IProfileService, ProfileService>();
+// builder.Services.AddScoped<IAttachmentService, AttachmentService>();
+// builder.Services.AddScoped<IAttachmentMessageService, AttachmentMessageService>();
+// builder.Services.AddScoped<IConversationSettingsService, ConversationSettingsService>();
+// builder.Services.AddScoped<IMessageReceiptService, MessageReceiptService>();
+// builder.Services.AddScoped<IFileStorage, LocalFileStorage>();
+
+var app = builder.Build();
 
 // Middleware order: CORS -> Authentication -> Authorization
 app.UseCors("Frontend");

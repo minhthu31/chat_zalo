@@ -104,3 +104,13 @@ Khi **A chặn B**:
 5. CI/build/test hoặc Leader chạy kiểm chứng; thành viên **không bắt buộc viết báo cáo `.md`**. Cập nhật hai tài liệu schema là cần thiết vì chúng là hợp đồng, không phải báo cáo.
 
 **Nguồn sự thật:** `docs/API_CONTRACT.md` quyết định HTTP/DTO/chính sách API; tài liệu này quyết định database invariants; `database/ERD.mmd` là sơ đồ logic; chỉ triển khai các thay đổi mới khi Leader duyệt thiết kế schema và API khớp nhau.
+
+---
+
+## Sprint 3
+
+- Users: thêm Bio và tham chiếu Avatar; giữ cột tên hiện có.
+- Thêm metadata Avatar, Attachments và liên kết Message–Attachment.
+- Thêm thiết lập mute theo người dùng/hội thoại.
+- Tái sử dụng hai mốc receipt trong `ConversationMembers`.
+- Tạo migration mới; kiểm tra DB mới và DB nâng cấp từ Sprint 2, giữ dữ liệu cũ.
