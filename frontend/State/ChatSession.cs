@@ -54,30 +54,43 @@ public sealed class ChatSession(IChatMessages api, int pageSize = 20)
         {
             if (!IsCurrent(id, state, version)) return;
             state.Loading = true;
-            var first = state.FirstSeq;
+            var first = state.VisibilityStartSeq ?? state.FirstSeq;
             var complete = state.Initialized && !state.HasOlder;
-            var all = await api.GetLatestAsync(id);
-            var batch = all.ToList();
-            while (batch.Count == pageSize && batch.Count > 0
-                && (complete || (first.HasValue && batch.Min(m => m.Seq) > first.Value)))
+            var all = new List<MessageResponse>();
+            bool hasOlder;
+            if (state.Initialized && (first.HasValue || complete))
             {
-                var cursor = batch.Min(m => m.Seq);
-                batch = await api.GetOlderAsync(id, cursor);
-                if (batch.Any(m => m.Seq >= cursor))
-                    throw new InvalidOperationException("History cursor did not advance.");
-                all.AddRange(batch);
+                var cursor = complete ? 0 : Math.Max(0, first!.Value - 1);
+                hasOlder = !complete && cursor > 0;
+                while (true)
+                {
+                    var batch = await api.GetNewAsync(id, cursor);
+                    if (!IsCurrent(id, state, version)) return;
+                    var valid = batch.Where(m => m.ConversationId == id && m.Seq > cursor).ToList();
+                    all.AddRange(valid);
+                    if (batch.Count < 100) break;
+                    var next = valid.Select(m => m.Seq).DefaultIfEmpty(cursor).Max();
+                    if (next <= cursor) throw new InvalidOperationException("Messages cursor did not advance.");
+                    cursor = next;
+                }
+            }
+            else
+            {
+                all = await api.GetLatestAsync(id);
+                hasOlder = all.Count == pageSize;
             }
             if (!IsCurrent(id, state, version)) return;
             state.Replace(id, all);
+            state.VisibilityStartSeq = complete ? 0 : first ?? state.FirstSeq;
             state.SyncedSeq = all.Where(m => m.ConversationId == id).Select(m => m.Seq).DefaultIfEmpty().Max();
-            state.HasOlder = batch.Count == pageSize;
+            state.HasOlder = hasOlder;
             state.Initialized = true;
         }
         catch (ApiException ex) when (ex.StatusCode is 401 or 403)
         {
             if (IsCurrent(id, state, version))
             {
-                state.Replace(id, []); state.Initialized = false; state.HasOlder = false; state.SyncedSeq = 0;
+                state.Replace(id, []); state.VisibilityStartSeq = null; state.Initialized = false; state.HasOlder = false; state.SyncedSeq = 0;
             }
             throw;
         }
@@ -96,6 +109,8 @@ public sealed class ChatSession(IChatMessages api, int pageSize = 20)
             var batch = await api.GetOlderAsync(id, before);
             if (!IsCurrent(id, state, version)) return;
             state.Merge(id, batch);
+            if (state.FirstSeq is long first)
+                state.VisibilityStartSeq = Math.Min(state.VisibilityStartSeq ?? first, first);
             state.HasOlder = batch.Count == pageSize;
         }
         finally { state.Loading = false; state.Gate.Release(); }

@@ -7,6 +7,7 @@ public sealed class ConversationState
     public IReadOnlyList<MessageResponse> Messages => messages.Values.ToList();
     // Do not advance this cursor from a POST response: missing messages may precede it.
     public long SyncedSeq { get; internal set; }
+    internal long? VisibilityStartSeq { get; set; }
     public long? FirstSeq => messages.Count == 0 ? null : messages.Keys.First();
     public bool Initialized { get; internal set; }
     public bool HasOlder { get; internal set; }

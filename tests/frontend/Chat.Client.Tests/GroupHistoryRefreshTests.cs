@@ -37,7 +37,11 @@ public class GroupHistoryRefreshTests
   await session.SyncAsync(api.Id);api.Count=271;
   if(group) { await session.RefreshVisibleAsync(api.Id);await session.RefreshVisibleAsync(api.Id); }
   else { await session.SyncAsync(api.Id);await session.SyncAsync(api.Id); }
-  Assert.Equal(Enumerable.Range(11,261).Select(i=>(long)i),session.State.For(api.Id).Messages.Select(m=>m.Seq));
+  var messages=session.State.For(api.Id).Messages;
+  Assert.Equal(Enumerable.Range(11,261).Select(i=>(long)i),messages.Select(m=>m.Seq));
+  Assert.Equal(messages.Count,messages.Select(m=>m.Seq).Distinct().Count());
+  Assert.Equal(messages.Count,messages.Select(m=>m.Id).Distinct().Count());
+  Assert.Equal(271,session.State.For(api.Id).SyncedSeq);
  }
  class Api:IChatMessages
  {
