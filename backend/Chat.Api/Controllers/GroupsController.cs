@@ -165,6 +165,20 @@ public class GroupsController : ControllerBase
     }
 
     // 5. Chuyển quyền Admin (Propose Admin Transfer)
+    [HttpGet("api/conversations/{id:guid}/admin-transfer")]
+    [HttpGet("api/groups/{id:guid}/admin-transfer")]
+    public async Task<IActionResult> GetPendingAdminTransfers(Guid id, CancellationToken ct)
+    {
+        var userId = ResolveCurrentUserId();
+        if (userId is null)
+            return Unauthorized(new AuthErrorResponse { Code = "UNAUTHORIZED", Message = "Unauthorized" });
+        try
+        {
+            return Ok(await _groupService.GetPendingAdminTransfersAsync(userId.Value, id, ct));
+        }
+        catch (Exception ex) { return HandleException(ex); }
+    }
+
     [HttpPost("api/conversations/{id:guid}/admin-transfer")]
     [HttpPost("api/groups/{id:guid}/admin-transfer")]
     [ValidateAntiforgeryJson]
