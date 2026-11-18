@@ -81,7 +81,15 @@ else
 
         try
         {
-            var target = Members.First(m => m.UserId == _target);
+            // Người được chọn có thể vừa bị xóa khỏi nhóm ở nơi khác: báo lỗi thay vì để chương trình sập
+            var target = Members.FirstOrDefault(m => m.UserId == _target);
+            if (target is null)
+            {
+                _error = "Người này không còn trong nhóm. Vui lòng chọn lại.";
+                _target = Guid.Empty;
+                return;
+            }
+
             var request = await GroupApi.ProposeAdminTransferAsync(GroupId, _target);
 
             // Liên kết dẫn tới trang nhóm kèm mã đề nghị; người được chọn mở ra sẽ thấy nút Đồng ý / Từ chối

@@ -216,6 +216,8 @@
     /* ----- Nút ----- */
     .btn {
         display: inline-block;
+        box-sizing: border-box; /* thẻ <a class="btn"> cũng tính cả phần đệm vào chiều rộng, không tràn khung */
+        text-align: center;
         padding: 0.6rem 1.1rem;
         border: 1px solid transparent;
         border-radius: 10px;
