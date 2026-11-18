@@ -65,3 +65,59 @@
 - Phải phân biệt chức năng mock với chức năng đã tích hợp Backend thật.
 - Không sử dụng ReactJS, JSX hoặc Vite.
 - Không kết nối PostgreSQL trực tiếp từ Frontend.
+
+---
+
+## Sprint 3
+
+API/DTO: [API_CONTRACT.md](API_CONTRACT.md#sprint-3).
+DI: [SPRINT3_INTEGRATION.md](SPRINT3_INTEGRATION.md).
+
+### Kế thừa Sprint 1–2
+
+| Phần hiện có | Sprint 3 |
+|---|---|
+| Tin nhắn có `createdAt` UTC | FE dùng để hiển thị ngày/giờ địa phương |
+| Hồ sơ cũ dùng `GET/PATCH /api/users/me`, tên tối đa 100 ký tự | Giữ API cũ; API hồ sơ mới giới hạn tên 50 ký tự |
+| `ConversationMembers` có `LastReadSeq`, `LastDeliveredSeq` | Tái sử dụng, không tạo bảng receipts riêng |
+| Messages dùng `body`, Seq và ClientMessageId | Tiếp tục dùng chung cho tin có file |
+| FE có `ApiRequestSender` xử lý Cookie/CSRF | Bổ sung multipart và download |
+| Có Friendships, Blocks, quyền nhóm và SignalR | Tái sử dụng cho Sprint 3 |
+
+Tên cũ dài hơn 50 ký tự vẫn được đọc, không tự cắt hoặc sửa.
+
+### Tin nhắn và file
+
+1. FE gọi Messages hiện có với `limit=10`.
+2. Lấy ID của các tin vừa nhận để gọi `attachment-details`.
+3. Ghép file vào tin bằng `messageId`.
+
+`messageIds` là danh sách Guid phân cách bằng dấu phẩy, tối đa 100 ID. Backend kiểm tra quyền từng tin; nếu có ID không được phép truy cập thì từ chối request.
+
+### SignalR
+
+Giữ Hub `/hubs/chat` và event `ConversationChanged`:
+
+```json
+{
+  "eventId": "Guid",
+  "conversationId": "Guid",
+  "latestSeq": 120
+}
+```
+
+Bổ sung event `MessageReceiptChanged`:
+
+```json
+{
+  "conversationId": "Guid",
+  "userId": "Guid",
+  "deliveredSeq": 120,
+  "readSeq": 118
+}
+```
+
+- Kiểm tra subscription, quyền nhóm và Blocks trước khi phát.
+- Chỉ phát sau commit.
+- FE bỏ qua mốc cũ, ghép tên từ API receipts.
+- Reconnect: Join lại → đồng bộ Messages bằng `afterSeq` → tải lại receipts và thiết lập thông báo.
