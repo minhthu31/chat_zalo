@@ -1,85 +1,258 @@
-%% chat_zalo – ERD Sprint 1 + Sprint 2
-%% This Mermaid source renders on GitHub Preview; a PNG cannot be embedded directly in an .mmd file.
 erDiagram
     Users ||--o{ Friendships : involved
     Users ||--o{ UserBlocks : involved
     Users ||--o{ Conversations : creates
     Users ||--o{ ConversationMembers : joins
     Users ||--o{ Messages : sends
+
     Conversations ||--o| DirectConversations : direct
     Conversations ||--o| GroupConversations : group
     Conversations ||--o{ ConversationMembers : members
     Conversations ||--o{ Messages : holds
     Conversations ||--o{ GroupAdminTransferRequests : transfers
+
     Users ||--o{ GroupAdminTransferRequests : from_user
     Users ||--o{ GroupAdminTransferRequests : to_user
 
+    %% Sprint 3 relationships
+    Users ||--o{ StoredFiles : uploads
+    StoredFiles o|--o| Users : selected_as_avatar
+    Conversations o|--o{ StoredFiles : attachment_uploads
+    Messages ||--o{ MessageAttachments : has_files
+    StoredFiles ||--o| MessageAttachments : attached_once
+    Users ||--o{ ConversationNotificationSettings : configures
+    Conversations ||--o{ ConversationNotificationSettings : settings
+
     Users {
-      uuid Id PK
-      string UserName
-      string NormalizedUserName UK
-      string Email
-      string NormalizedEmail UK
-      string DisplayName
-    }
-    Friendships {
-      uuid UserLowId PK,FK
-      uuid UserHighId PK,FK
-      uuid RequesterUserId FK
-      string Status
-    }
-    UserBlocks {
-      uuid BlockerUserId PK,FK
-      uuid BlockedUserId PK,FK
-    }
-    Conversations {
-      uuid Id PK
-      uuid CreatedByUserId FK
-      string Kind
-      bigint LastMessageSeq
-    }
-    DirectConversations {
-      uuid ConversationId PK,FK
-      uuid UserLowId FK
-      uuid UserHighId FK
-    }
-    GroupConversations {
-      uuid ConversationId PK,FK
-      string Name
-      timestamptz DeletedAt
-    }
-    ConversationMembers {
-      uuid ConversationId PK,FK
-      uuid UserId PK,FK
-      bigint LastDeliveredSeq
-      bigint LastReadSeq
-      string Role
-      timestamptz LeftAt
-    }
-    GroupAdminTransferRequests {
-      uuid Id PK
-      uuid ConversationId FK
-      uuid FromUserId FK
-      uuid ToUserId FK
-      string Status
-      timestamptz CreatedAt
-      timestamptz ResolvedAt
-    }
-    Messages {
-      uuid Id PK
-      uuid ConversationId FK
-      uuid SenderUserId FK
-      uuid ClientMessageId
-      bigint Seq
-      string Body
-      timestamptz CreatedAt
+        uuid Id PK
+        string UserName
+        string NormalizedUserName UK
+        string Email
+        string NormalizedEmail UK
+        string DisplayName
+        string Bio
+        uuid AvatarFileId FK
     }
 
-%% Sprint 1 tables retained. Sprint 2 proposes GroupConversations, GroupAdminTransferRequests,
-%% and Role / LeftAt on ConversationMembers. Confirm against actual ChatDbContext before migration.
-%% UNIQUE(ConversationId, Seq) and UNIQUE(ConversationId, SenderUserId, ClientMessageId) on Messages.
-%% UNIQUE(UserLowId, UserHighId) on DirectConversations.
-%% Group: partial UNIQUE ConversationMembers(ConversationId) WHERE Role='Admin' AND LeftAt IS NULL.
-%% This enforces at MOST one Admin; service transactions enforce AT LEAST one for active groups.
-%% Other FK/CHECK/uniqueness rules documented in DATABASE_RULES.md.
-%% Other Identity tables: Roles, UserRoles, UserClaims, RoleClaims, UserLogins, UserTokens.
+    Friendships {
+        uuid UserLowId PK,FK
+        uuid UserHighId PK,FK
+        uuid RequesterUserId FK
+        string Status
+    }
+
+    UserBlocks {
+        uuid BlockerUserId PK,FK
+        uuid BlockedUserId PK,FK
+    }
+
+    Conversations {
+        uuid Id PK
+        uuid CreatedByUserId FK
+        string Kind
+        bigint LastMessageSeq
+    }
+
+    DirectConversations {
+        uuid ConversationId PK,FK
+        uuid UserLowId FK
+        uuid UserHighId FK
+    }
+
+    GroupConversations {
+        uuid ConversationId PK,FK
+        string Name
+        timestamptz DeletedAt
+    }
+
+    ConversationMembers {
+        uuid ConversationId PK,FK
+        uuid UserId PK,FK
+        bigint LastDeliveredSeq
+        bigint LastReadSeq
+        string Role
+        timestamptz LeftAt
+    }
+
+    GroupAdminTransferRequests {
+        uuid Id PK
+        uuid ConversationId FK
+        uuid FromUserId FK
+        uuid ToUserId FK
+        string Status
+        timestamptz CreatedAt
+        timestamptz ResolvedAt
+    }
+
+    Messages {
+        uuid Id PK
+        uuid ConversationId FK
+        uuid SenderUserId FK
+        uuid ClientMessageId
+        bigint Seq
+        string Body
+        timestamptz CreatedAt
+    }
+
+    StoredFiles {
+        uuid Id PK
+        uuid UploadedByUserId FK
+        uuid ConversationId FK
+        string UsageType
+        string Status
+        string StorageKey UK
+        string FileName
+        string ContentType
+        bigint SizeBytes
+        timestamptz CreatedAt
+    }
+
+    MessageAttachments {
+        uuid MessageId PK,FK
+        uuid StoredFileId PK,FK,UK
+    }
+
+    ConversationNotificationSettings {
+        uuid ConversationId PK,FK
+        uuid UserId PK,FK
+        boolean IsMuted
+    }
+
+%% ============================================
+%% SPRINT 1 - EXISTING RULES
+%% ============================================
+
+%% Friendships and UserBlocks retain existing rules.
+%% DirectConversations:
+%% UNIQUE(UserLowId, UserHighId)
+
+%% Messages:
+%% UNIQUE(ConversationId, Seq)
+%% UNIQUE(ConversationId, SenderUserId, ClientMessageId)
+
+%% Seq is assigned per conversation.
+%% ClientMessageId prevents duplicate messages.
+
+%% ============================================
+%% SPRINT 2 - GROUP CHAT
+%% ============================================
+
+%% GroupConversations stores group information.
+%% GroupAdminTransferRequests stores Admin transfer requests.
+%% ConversationMembers.Role = Admin or Member.
+%% ConversationMembers.LeftAt records leaving time.
+
+%% Partial UNIQUE ConversationMembers(ConversationId)
+%% WHERE Role = 'Admin' AND LeftAt IS NULL.
+
+%% Enforces at most one active Admin.
+%% Service transactions enforce at least one Admin.
+
+%% ============================================
+%% SPRINT 3 - PROFILE AND AVATAR
+%% ============================================
+
+%% Users.Bio: maximum 200 characters.
+%% Users.AvatarFileId references StoredFiles.Id.
+%% AvatarFileId is nullable.
+
+%% New profile API DisplayName:
+%% Minimum 1, maximum 50 characters after trim.
+%% Existing longer names remain unchanged.
+
+%% Avatar supports JPG, PNG, WebP.
+%% Maximum avatar size: 2 MiB.
+%% Only account owner may edit their profile.
+%% Email is not publicly exposed.
+
+%% ============================================
+%% SPRINT 3 - FILE ATTACHMENTS
+%% ============================================
+
+%% StoredFiles stores metadata only.
+%% File content is stored using IFileStorage.
+
+%% UsageType:
+%% Avatar or Attachment.
+
+%% Attachment status:
+%% Pending or Attached.
+
+%% Pending file belongs to the uploader.
+%% Attachment files require ConversationId.
+%% Avatar files have ConversationId = NULL.
+
+%% MessageAttachments links Messages to StoredFiles.
+%% UNIQUE(StoredFileId) prevents reusing a file.
+
+%% Maximum 5 files per message.
+%% Maximum 10 MiB per file.
+%% Maximum 50 MiB per message.
+%% 1 MiB = 1048576 bytes.
+
+%% Allowed types:
+%% JPG, PNG, WebP, PDF, DOCX, XLSX, TXT.
+
+%% Body may be empty when attachments exist.
+%% Non-empty Body maximum: 4000 characters.
+
+%% File permissions follow conversation membership
+%% and Blocks rules.
+
+%% Pending to Attached transition occurs
+%% in the message database transaction.
+
+%% Manual cleanup for unused Pending files.
+%% No mandatory automatic 24-hour cleanup.
+
+%% Never delete Attached files or active Avatars.
+
+%% ============================================
+%% SPRINT 3 - NOTIFICATION SETTINGS
+%% ============================================
+
+%% ConversationNotificationSettings:
+%% PRIMARY KEY(ConversationId, UserId).
+%% IsMuted defaults to false.
+
+%% Mute is stored per account and conversation.
+%% Same account uses settings across devices.
+%% Muting disables alerts only.
+%% Messages and SignalR continue normally.
+
+%% ============================================
+%% SPRINT 3 - MESSAGE RECEIPTS
+%% ============================================
+
+%% Reuse existing ConversationMembers fields:
+%% LastDeliveredSeq
+%% LastReadSeq
+
+%% No separate Receipts table.
+
+%% LastReadSeq <= LastDeliveredSeq <= LastMessageSeq.
+%% Receipt values only increase.
+
+%% One device updates the shared account state.
+%% Other devices synchronize using receipts API.
+
+%% Do not mark read based only on online status.
+
+%% Group chat shows the names of readers.
+%% The sender is excluded.
+%% Blocks and permissions must be enforced.
+
+%% ============================================
+%% IDENTITY AND MIGRATION
+%% ============================================
+
+%% Other ASP.NET Core Identity tables:
+%% Roles, UserRoles, UserClaims,
+%% RoleClaims, UserLogins, UserTokens.
+
+%% Sprint 3 requires new EF Core migrations.
+%% Keep Sprint 1 and Sprint 2 migrations.
+%% Preserve existing data.
+
+%% Validate against ChatDbContext
+%% and DATABASE_RULES.md before migration.
