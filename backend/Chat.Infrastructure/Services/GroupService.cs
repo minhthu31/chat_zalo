@@ -177,6 +177,21 @@ public class GroupService : IGroupService
         };
     }
 
+    public async Task<List<AdminTransferDto>> GetPendingAdminTransfersAsync(Guid currentUserId, Guid groupId, CancellationToken ct = default)
+    {
+        await GetGroupAsync(currentUserId, groupId, ct);
+        return await _db.GroupAdminTransferRequests.AsNoTracking()
+            .Where(r => r.ConversationId == groupId && r.Status == "Pending"
+                && (r.FromUserId == currentUserId || r.ToUserId == currentUserId))
+            .OrderBy(r => r.CreatedAt).ThenBy(r => r.Id)
+            .Select(r => new AdminTransferDto
+            {
+                Id = r.Id, ConversationId = r.ConversationId,
+                FromUserId = r.FromUserId, ToUserId = r.ToUserId,
+                Status = r.Status, CreatedAt = r.CreatedAt
+            }).ToListAsync(ct);
+    }
+
     public async Task<List<GroupMemberDto>> GetMembersAsync(Guid currentUserId, Guid groupId, CancellationToken ct = default)
     {
         var conversation = await _db.Conversations

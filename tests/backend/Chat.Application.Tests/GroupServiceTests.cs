@@ -715,6 +715,8 @@ public class GroupServiceTests
             => throw new InvalidOperationException("Sensitive internal error message");
         public Task<AdminTransferDto> ProposeAdminTransferAsync(Guid currentUserId, Guid groupId, Guid targetUserId, CancellationToken ct = default)
             => throw new InvalidOperationException("Sensitive internal error message");
+        public Task<List<AdminTransferDto>> GetPendingAdminTransfersAsync(Guid currentUserId, Guid groupId, CancellationToken ct = default)
+            => throw new InvalidOperationException("Sensitive internal error message");
         public Task AcceptAdminTransferAsync(Guid currentUserId, Guid groupId, Guid requestId, CancellationToken ct = default)
             => throw new InvalidOperationException("Sensitive internal error message");
         public Task RejectAdminTransferAsync(Guid currentUserId, Guid groupId, Guid requestId, CancellationToken ct = default)

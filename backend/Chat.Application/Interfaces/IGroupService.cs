@@ -10,6 +10,7 @@ public interface IGroupService
     Task<GroupMemberDto> AddMemberAsync(Guid currentUserId, Guid groupId, Guid targetUserId, CancellationToken ct = default);
     Task RemoveMemberAsync(Guid currentUserId, Guid groupId, Guid targetUserId, CancellationToken ct = default);
     Task<AdminTransferDto> ProposeAdminTransferAsync(Guid currentUserId, Guid groupId, Guid targetUserId, CancellationToken ct = default);
+    Task<List<AdminTransferDto>> GetPendingAdminTransfersAsync(Guid currentUserId, Guid groupId, CancellationToken ct = default);
     Task AcceptAdminTransferAsync(Guid currentUserId, Guid groupId, Guid requestId, CancellationToken ct = default);
     Task RejectAdminTransferAsync(Guid currentUserId, Guid groupId, Guid requestId, CancellationToken ct = default);
     Task LeaveGroupAsync(Guid currentUserId, Guid groupId, CancellationToken ct = default);
