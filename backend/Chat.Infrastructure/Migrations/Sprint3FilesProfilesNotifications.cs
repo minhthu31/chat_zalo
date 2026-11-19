@@ -244,6 +244,21 @@ namespace Chat.Infrastructure.Migrations
                         RAISE EXCEPTION 'Invalid message attachment or more than five files on a message'
                             USING ERRCODE = '23514';
                     END IF;
+
+                    -- Updating the link must not leave the previously attached file orphaned.
+                    IF TG_OP = 'UPDATE' THEN
+                        IF OLD."StoredFileId" IS DISTINCT FROM NEW."StoredFileId" AND EXISTS (
+                            SELECT 1 FROM "StoredFiles" f
+                            WHERE f."Id" = OLD."StoredFileId"
+                              AND f."Status" = 'Attached'
+                              AND NOT EXISTS (
+                                  SELECT 1 FROM "MessageAttachments" a
+                                  WHERE a."StoredFileId" = f."Id")
+                        ) THEN
+                            RAISE EXCEPTION 'Previous attached file has no message link'
+                                USING ERRCODE = '23514';
+                        END IF;
+                    END IF;
                     RETURN NULL;
                 END;
                 $$ LANGUAGE plpgsql;
@@ -252,6 +267,21 @@ namespace Chat.Infrastructure.Migrations
                 AFTER INSERT OR UPDATE OR DELETE ON "MessageAttachments"
                 DEFERRABLE INITIALLY DEFERRED
                 FOR EACH ROW EXECUTE FUNCTION chat_s3_validate_message_attachment();
+
+                CREATE FUNCTION chat_s3_prevent_message_owner_change() RETURNS trigger AS $$
+                BEGIN
+                    IF NEW."SenderUserId" IS DISTINCT FROM OLD."SenderUserId"
+                       OR NEW."ConversationId" IS DISTINCT FROM OLD."ConversationId" THEN
+                        RAISE EXCEPTION 'Message sender and conversation are immutable'
+                            USING ERRCODE = '23514';
+                    END IF;
+                    RETURN NEW;
+                END;
+                $$ LANGUAGE plpgsql;
+
+                CREATE TRIGGER "TR_Messages_ImmutableOwner"
+                BEFORE UPDATE OF "SenderUserId", "ConversationId" ON "Messages"
+                FOR EACH ROW EXECUTE FUNCTION chat_s3_prevent_message_owner_change();
                 """);
         }
 
@@ -259,6 +289,7 @@ namespace Chat.Infrastructure.Migrations
         protected override void Down(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.Sql("""
+                DROP FUNCTION chat_s3_prevent_message_owner_change() CASCADE;
                 DROP FUNCTION chat_s3_validate_message_attachment() CASCADE;
                 DROP FUNCTION chat_s3_validate_file_links() CASCADE;
                 DROP FUNCTION chat_s3_validate_avatar() CASCADE;

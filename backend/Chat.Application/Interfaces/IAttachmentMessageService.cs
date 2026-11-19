@@ -2,7 +2,7 @@ using Chat.Application.DTOs.Attachments;
 
 namespace Chat.Application.Interfaces;
 
-public interface IMessageAttachmentService
+public interface IAttachmentMessageService
 {
     Task<SendAttachmentMessageResponse> SendAsync(
         Guid currentUserId,
