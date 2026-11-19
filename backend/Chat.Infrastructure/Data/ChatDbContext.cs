@@ -20,6 +20,9 @@ public class ChatDbContext : IdentityDbContext<ApplicationUser, IdentityRole<Gui
     public DbSet<GroupConversation> GroupConversations => Set<GroupConversation>();
     public DbSet<GroupAdminTransferRequest> GroupAdminTransferRequests => Set<GroupAdminTransferRequest>();
     public DbSet<Message> Messages => Set<Message>();
+    public DbSet<StoredFile> StoredFiles => Set<StoredFile>();
+    public DbSet<MessageAttachment> MessageAttachments => Set<MessageAttachment>();
+    public DbSet<ConversationNotificationSetting> ConversationNotificationSettings => Set<ConversationNotificationSetting>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {

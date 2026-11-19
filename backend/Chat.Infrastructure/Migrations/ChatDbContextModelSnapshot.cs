@@ -116,6 +116,26 @@ namespace Chat.Infrastructure.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Chat.Domain.Entities.ConversationNotificationSetting", b =>
+                {
+                    b.Property<Guid>("ConversationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsMuted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.HasKey("ConversationId", "UserId");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("ConversationNotificationSettings", (string)null);
+                });
+
             modelBuilder.Entity("Chat.Domain.Entities.DirectConversation", b =>
                 {
                     b.Property<Guid>("ConversationId")
@@ -287,6 +307,90 @@ namespace Chat.Infrastructure.Migrations
                     b.ToTable("Messages", (string)null);
                 });
 
+            modelBuilder.Entity("Chat.Domain.Entities.MessageAttachment", b =>
+                {
+                    b.Property<Guid>("MessageId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("StoredFileId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("MessageId", "StoredFileId");
+
+                    b.HasIndex("StoredFileId")
+                        .IsUnique();
+
+                    b.ToTable("MessageAttachments", (string)null);
+                });
+
+            modelBuilder.Entity("Chat.Domain.Entities.StoredFile", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<Guid?>("ConversationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<long>("SizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("StorageKey")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<Guid>("UploadedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("UsageType")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ConversationId");
+
+                    b.HasIndex("StorageKey")
+                        .IsUnique();
+
+                    b.HasIndex("UploadedByUserId");
+
+                    b.HasIndex("Status", "CreatedAt");
+
+                    b.ToTable("StoredFiles", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_StoredFiles_ContentTypeNonEmpty", "length(btrim(\"ContentType\")) > 0");
+
+                            t.HasCheckConstraint("CK_StoredFiles_FileNameNonEmpty", "length(btrim(\"FileName\")) > 0");
+
+                            t.HasCheckConstraint("CK_StoredFiles_SizePositive", "\"SizeBytes\" > 0");
+
+                            t.HasCheckConstraint("CK_StoredFiles_StorageKeyNonEmpty", "length(btrim(\"StorageKey\")) > 0");
+
+                            t.HasCheckConstraint("CK_StoredFiles_UsageStatusAndSize", "(\"UsageType\" = 'Avatar' AND \"ConversationId\" IS NULL\n    AND \"Status\" IN ('Pending', 'Active', 'Inactive')\n    AND \"SizeBytes\" <= 2097152)\nOR\n(\"UsageType\" = 'Attachment' AND \"ConversationId\" IS NOT NULL\n    AND \"Status\" IN ('Pending', 'Attached')\n    AND \"SizeBytes\" <= 10485760)");
+                        });
+                });
+
             modelBuilder.Entity("Chat.Domain.Entities.UserBlock", b =>
                 {
                     b.Property<Guid>("BlockerUserId")
@@ -316,6 +420,16 @@ namespace Chat.Infrastructure.Migrations
 
                     b.Property<int>("AccessFailedCount")
                         .HasColumnType("integer");
+
+                    b.Property<Guid?>("AvatarFileId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Bio")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasDefaultValue("");
 
                     b.Property<string>("ConcurrencyStamp")
                         .IsConcurrencyToken()
@@ -370,6 +484,9 @@ namespace Chat.Infrastructure.Migrations
                         .HasColumnType("character varying(256)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("AvatarFileId")
+                        .IsUnique();
 
                     b.HasIndex("NormalizedEmail")
                         .IsUnique()
@@ -538,6 +655,15 @@ namespace Chat.Infrastructure.Migrations
                     b.Navigation("Conversation");
                 });
 
+            modelBuilder.Entity("Chat.Domain.Entities.ConversationNotificationSetting", b =>
+                {
+                    b.HasOne("Chat.Domain.Entities.ConversationMember", null)
+                        .WithMany()
+                        .HasForeignKey("ConversationId", "UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Chat.Domain.Entities.DirectConversation", b =>
                 {
                     b.HasOne("Chat.Domain.Entities.Conversation", "Conversation")
@@ -634,6 +760,39 @@ namespace Chat.Infrastructure.Migrations
                     b.Navigation("Conversation");
                 });
 
+            modelBuilder.Entity("Chat.Domain.Entities.MessageAttachment", b =>
+                {
+                    b.HasOne("Chat.Domain.Entities.Message", "Message")
+                        .WithMany()
+                        .HasForeignKey("MessageId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Chat.Domain.Entities.StoredFile", "StoredFile")
+                        .WithMany()
+                        .HasForeignKey("StoredFileId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Message");
+
+                    b.Navigation("StoredFile");
+                });
+
+            modelBuilder.Entity("Chat.Domain.Entities.StoredFile", b =>
+                {
+                    b.HasOne("Chat.Domain.Entities.Conversation", null)
+                        .WithMany()
+                        .HasForeignKey("ConversationId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Chat.Infrastructure.Identity.ApplicationUser", null)
+                        .WithMany()
+                        .HasForeignKey("UploadedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Chat.Domain.Entities.UserBlock", b =>
                 {
                     b.HasOne("Chat.Infrastructure.Identity.ApplicationUser", null)
@@ -647,6 +806,14 @@ namespace Chat.Infrastructure.Migrations
                         .HasForeignKey("BlockerUserId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("Chat.Infrastructure.Identity.ApplicationUser", b =>
+                {
+                    b.HasOne("Chat.Domain.Entities.StoredFile", null)
+                        .WithMany()
+                        .HasForeignKey("AvatarFileId")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRoleClaim<System.Guid>", b =>
