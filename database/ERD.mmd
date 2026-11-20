@@ -22,6 +22,7 @@ erDiagram
     StoredFiles ||--o| MessageAttachments : attached_once
     Users ||--o{ ConversationNotificationSettings : configures
     Conversations ||--o{ ConversationNotificationSettings : settings
+    ConversationMembers ||--o| ConversationNotificationSettings : member_setting
 
     Users {
         uuid Id PK
@@ -155,6 +156,11 @@ erDiagram
 %% Users.Bio: maximum 200 characters.
 %% Users.AvatarFileId references StoredFiles.Id.
 %% AvatarFileId is nullable.
+%% AvatarFileId has a unique index when non-null.
+%% Referenced Avatar must belong to that User and have Status Active.
+%% Avatar statuses: Pending, Active, Inactive.
+%% Swap Users.AvatarFileId and file statuses in one transaction.
+%% Delete old physical content only after commit and when unreferenced.
 
 %% New profile API DisplayName:
 %% Minimum 1, maximum 50 characters after trim.
@@ -184,6 +190,11 @@ erDiagram
 
 %% MessageAttachments links Messages to StoredFiles.
 %% UNIQUE(StoredFileId) prevents reusing a file.
+%% Attached file must have exactly one MessageAttachments link.
+%% Pending Attachment must have no message link.
+%% File uploader = Message sender; file conversation = Message conversation.
+%% Relinking validates both old and new file/message references.
+%% Message sender and conversation are immutable.
 
 %% Maximum 5 files per message.
 %% Maximum 10 MiB per file.
@@ -214,6 +225,7 @@ erDiagram
 %% ConversationNotificationSettings:
 %% PRIMARY KEY(ConversationId, UserId).
 %% IsMuted defaults to false.
+%% Composite FK (ConversationId, UserId) references ConversationMembers.
 
 %% Mute is stored per account and conversation.
 %% Same account uses settings across devices.
@@ -241,6 +253,8 @@ erDiagram
 %% Group chat shows the names of readers.
 %% The sender is excluded.
 %% Blocks and permissions must be enforced.
+%% Unresolved CHAT-28: aggregate Seq cannot prove reading a previously hidden
+%% message after unblock; finalize semantics before implementation.
 
 %% ============================================
 %% IDENTITY AND MIGRATION
