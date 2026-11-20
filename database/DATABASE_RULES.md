@@ -114,3 +114,36 @@ Khi **A chặn B**:
 - Thêm thiết lập mute theo người dùng/hội thoại.
 - Tái sử dụng hai mốc receipt trong `ConversationMembers`.
 - Tạo migration mới; kiểm tra DB mới và DB nâng cấp từ Sprint 2, giữ dữ liệu cũ.
+
+### Schema đã thống nhất — CHAT-23
+
+Áp dụng theo migration `20261118171256_Sprint3FilesProfilesNotifications` đã merge, không tạo lại các bảng sau bằng script hoặc migration khác.
+
+| Bảng | Khóa và liên kết | Dữ liệu/ràng buộc |
+|---|---|---|
+| Users | AvatarFileId nullable FK → StoredFiles.Id, unique khi có giá trị | Bio tối đa 200 ký tự; giữ DisplayName hiện có và tên cũ, API mới kiểm tra 1–50 ký tự |
+| StoredFiles | Id PK; UploadedByUserId FK → Users; ConversationId nullable FK → Conversations; StorageKey UNIQUE | FileName, ContentType, SizeBytes > 0, CreatedAt UTC; chỉ metadata, không lưu bytes |
+| MessageAttachments | PK(MessageId, StoredFileId); hai FK Messages/StoredFiles; UNIQUE(StoredFileId) | Mỗi file chỉ gắn một tin; không xóa cascade file/tin |
+| ConversationNotificationSettings | PK(ConversationId, UserId), FK kép → ConversationMembers | IsMuted mặc định false; mỗi tài khoản/hội thoại một cài đặt |
+| ConversationMembers | Giữ PK và hai mốc LastReadSeq/LastDeliveredSeq | Không tạo bảng receipts riêng trong thiết kế đã chốt |
+
+### Vòng đời và tính toàn vẹn file
+
+- `UsageType=Attachment`: ConversationId bắt buộc, Status chỉ `Pending`/`Attached`, SizeBytes tối đa 10.485.760.
+- `UsageType=Avatar`: ConversationId phải null, Status chỉ `Pending`/`Active`/`Inactive`, SizeBytes tối đa 2.097.152.
+- Avatar được Users tham chiếu phải có đúng uploader là user đó, UsageType Avatar và Status Active. Chuyển Avatar/đặt null và cập nhật trạng thái file phải cùng transaction.
+- Liên kết MessageAttachments chỉ trỏ đến file Attachment Attached, cùng hội thoại và uploader là sender của tin. Attached bắt buộc có liên kết; Pending không được có liên kết tin.
+- Tối đa 5 liên kết/tin; mỗi file tối đa 10 MiB nên tổng tối đa 50 MiB. Service kiểm tra cả request, số lượng và tổng dung lượng trước khi commit.
+- Trigger kiểm tra cả liên kết cũ và mới khi đổi StoredFileId/MessageId; không để lại Attached không thuộc tin nào. SenderUserId và ConversationId của Messages không được sửa để vượt kiểm tra sở hữu file.
+- Một tin phải có nội dung văn bản hợp lệ hoặc có file; API văn bản Sprint 1–2 giữ yêu cầu body 1–4.000 ký tự, API mới cho body rỗng khi có 1–5 file hợp lệ.
+- Retry dùng chung UNIQUE(ConversationId, SenderUserId, ClientMessageId). Kiểm tra tin đã tồn tại trước điều kiện Pending; không gắn lại file hoặc tăng Seq khi retry.
+- Dọn Pending khóa row và đọc lại trạng thái, xác nhận không có tham chiếu Users/MessageAttachments trước khi xóa. Không dọn Attached hoặc Avatar Active/đang dùng; cleanup Pending không bao gồm Inactive.
+- Đổi/xóa Avatar: commit metadata trước khi xóa vật lý file cũ; nếu xóa thất bại giữ metadata Inactive và ghi log để xử lý lại. Không coi thao tác filesystem là một phần có thể rollback tự động cùng PostgreSQL.
+
+### Quyền, mute và receipts
+
+- Lưu file không thay thế quyền Backend: mọi upload/xem/tải kiểm tra user, membership, JoinedSeq, trạng thái nhóm và Blocks theo API_CONTRACT.md.
+- IsMuted chỉ điều khiển âm thanh/banner; không thay membership, subscription hoặc quyền nhận tin. GET mặc định false khi chưa có row; PUT lấy UserId từ phiên xác thực.
+- Mốc receipts dùng chung theo tài khoản/hội thoại, chỉ tăng, cập nhật đồng thời bằng giá trị lớn nhất và giữ `LastReadSeq <= LastDeliveredSeq <= LastMessageSeq`.
+- Các mốc không mô tả được từng tin đã từng bị Blocks ẩn. Không tự thêm bảng/cột hoặc diễn giải mọi Seq thấp hơn mốc là đã đọc sau bỏ chặn; chốt điểm này ở CHAT-28 trước khi triển khai.
+- Chỉ owner Database tạo migration thay đổi schema dùng chung. Tài liệu này mô tả schema hiện có; bổ sung hợp đồng không tự yêu cầu sửa migration đã áp dụng.
