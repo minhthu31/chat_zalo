@@ -124,6 +124,18 @@ public sealed class ConversationSettingsService : IConversationSettingsService
                 "conversationId phải khác rỗng.");
         }
 
+        var conversation = await _db.Conversations
+            .AsNoTracking()
+            .SingleOrDefaultAsync(c => c.Id == conversationId, cancellationToken);
+
+        if (conversation is null)
+        {
+            throw new ConversationSettingsServiceException(
+                404,
+                "NOT_FOUND",
+                "Hội thoại không tồn tại.");
+        }
+
         var isActiveMember = await _db.ConversationMembers
             .AsNoTracking()
             .AnyAsync(
@@ -134,13 +146,7 @@ public sealed class ConversationSettingsService : IConversationSettingsService
 
         if (!isActiveMember)
         {
-            var kind = await _db.Conversations
-                .AsNoTracking()
-                .Where(c => c.Id == conversationId)
-                .Select(c => c.Kind)
-                .FirstOrDefaultAsync(cancellationToken);
-
-            if (kind == "Group")
+            if (conversation.Kind == "Group")
             {
                 throw new ConversationSettingsServiceException(
                     403,
@@ -154,18 +160,31 @@ public sealed class ConversationSettingsService : IConversationSettingsService
                 "Bạn không có quyền truy cập hội thoại này.");
         }
 
-        var isDisbandedGroup = await _db.GroupConversations
-            .AsNoTracking()
-            .AnyAsync(
-                g => g.ConversationId == conversationId && g.DeletedAt != null,
-                cancellationToken);
+        if (conversation.Kind == "Group")
+        {
+            var isDisbandedGroup = await _db.GroupConversations
+                .AsNoTracking()
+                .AnyAsync(
+                    g => g.ConversationId == conversationId && g.DeletedAt != null,
+                    cancellationToken);
 
-        if (isDisbandedGroup)
+            if (isDisbandedGroup)
+            {
+                throw new ConversationSettingsServiceException(
+                    403,
+                    "GROUP_ACCESS_DENIED",
+                    "Nhóm đã được giải tán.");
+            }
+
+            return;
+        }
+
+        if (conversation.Kind != "Direct")
         {
             throw new ConversationSettingsServiceException(
                 403,
-                "GROUP_ACCESS_DENIED",
-                "Nhóm đã được giải tán.");
+                "CONVERSATION_ACCESS_DENIED",
+                "Bạn không có quyền truy cập hội thoại này.");
         }
 
         var isBlockedInDirect = await _db.DirectConversations
