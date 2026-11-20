@@ -86,6 +86,19 @@ public sealed class FriendshipsApiTests
             });
         }
 
+        public Task<PagedFriendSearchResponse> SearchFriendsAsync(Guid currentUserId, string? keyword, int page, int pageSize)
+        {
+            Record("SearchFriends", currentUserId, Guid.Empty);
+            return Task.FromResult(new PagedFriendSearchResponse
+            {
+                Items = [new SearchFriendDto { Id = Target, Username = "target-user", DisplayName = "Target User" }],
+                Page = page,
+                PageSize = pageSize,
+                TotalCount = 1,
+                TotalPages = 1
+            });
+        }
+
         public Task<FriendshipRequestsDto> GetRequestsAsync(Guid currentUserId)
         {
             Record("GetRequests", currentUserId, Guid.Empty);
@@ -159,6 +172,7 @@ public sealed class FriendshipsApiTests
     [Theory]
     [InlineData("GET", "/api/friendships")]
     [InlineData("GET", "/api/friendships/requests")]
+    [InlineData("GET", "/api/friendships/search?keyword=target&page=1&pageSize=10")]
     [InlineData("POST", "/api/friendships")]
     [InlineData("POST", "/api/friendships/00000000-0000-0000-0000-000000000001/accept")]
     [InlineData("POST", "/api/friendships/00000000-0000-0000-0000-000000000001/reject")]
@@ -288,6 +302,50 @@ public sealed class FriendshipsApiTests
         Assert.Equal(
             new[] { "Send", "GetFriends", "GetRequests", "Accept", "Reject", "Remove" },
             fake.Calls);
+    }
+
+    [Theory]
+    [InlineData("page=0", "INVALID_PAGE")]
+    [InlineData("pageSize=0", "INVALID_PAGE_SIZE")]
+    [InlineData("pageSize=101", "INVALID_PAGE_SIZE")]
+    public async Task SearchFriends_RejectsInvalidPagination(string query, string expectedCode)
+    {
+        var fake = new FakeFriendships();
+        using var factory = Factory(fake);
+        using var client = factory.CreateClient();
+        Authenticate(factory, client);
+
+        using var response = await client.GetAsync($"/api/friendships/search?{query}");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var error = await response.Content.ReadFromJsonAsync<ErrorBody>();
+        Assert.NotNull(error);
+        Assert.Equal(expectedCode, error!.Code);
+        Assert.Empty(fake.Calls);
+    }
+
+    [Fact]
+    public async Task SearchFriends_ReturnsPagedFriendSearchContract()
+    {
+        var fake = new FakeFriendships();
+        using var factory = Factory(fake);
+        using var client = factory.CreateClient();
+        Authenticate(factory, client);
+
+        using var response = await client.GetAsync("/api/friendships/search?keyword=target&page=1&pageSize=10");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var result = await response.Content.ReadFromJsonAsync<PagedFriendSearchResponse>();
+        Assert.NotNull(result);
+        Assert.Equal(1, result!.Page);
+        Assert.Equal(10, result.PageSize);
+        Assert.Equal(1, result.TotalCount);
+        var item = Assert.Single(result.Items);
+        Assert.Equal(Target, item.Id);
+        Assert.Equal("target-user", item.Username);
+        Assert.Equal("Target User", item.DisplayName);
+        Assert.Contains("SearchFriends", fake.Calls);
+        Assert.Equal(Caller, fake.CurrentUser);
     }
 
     [Fact]
