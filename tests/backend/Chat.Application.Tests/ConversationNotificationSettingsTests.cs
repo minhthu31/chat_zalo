@@ -18,6 +18,7 @@ using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 public sealed class ConversationNotificationSettingsTests
@@ -62,7 +63,13 @@ public sealed class ConversationNotificationSettingsTests
 
     private static async Task<IActionResult?> ExecuteJsonValidationFilterAsync(string rawJson)
     {
-        var filter = new ValidateUpdateNotificationSettingsJsonAttribute();
+        var updateMethod = typeof(ConversationNotificationSettingsController)
+            .GetMethod(nameof(ConversationNotificationSettingsController.Update));
+        Assert.NotNull(updateMethod);
+
+        var filter = Assert.Single(
+            updateMethod!.GetCustomAttributes(inherit: false).OfType<IAsyncResourceFilter>());
+
         var httpContext = new DefaultHttpContext();
         httpContext.Request.ContentType = "application/json";
         httpContext.Request.Body = new MemoryStream(Encoding.UTF8.GetBytes(rawJson));
@@ -454,6 +461,25 @@ public sealed class ConversationNotificationSettingsTests
     [InlineData("")]
     public async Task PutValidation_InvalidPayloads_Return400ValidationErrorAndPreserveExistingSettings(string rawPayload)
     {
+        var dbName = Guid.NewGuid().ToString("N");
+        var userA = MakeUser("a");
+        var userB = MakeUser("b");
+        var conversationId = Guid.NewGuid();
+
+        await using (var db = CreateInMemoryDbContext(dbName))
+        {
+            db.Users.AddRange(userA, userB);
+            db.Conversations.Add(new Conversation { Id = conversationId, CreatedByUserId = userA.Id, Kind = "Direct" });
+            db.DirectConversations.Add(new DirectConversation { ConversationId = conversationId, UserLowId = userA.Id, UserHighId = userB.Id });
+            db.ConversationMembers.AddRange(
+                new ConversationMember { ConversationId = conversationId, UserId = userA.Id, LeftAt = null },
+                new ConversationMember { ConversationId = conversationId, UserId = userB.Id, LeftAt = null });
+            await db.SaveChangesAsync();
+
+            var service = new ConversationSettingsService(db);
+            Assert.True((await service.UpdateAsync(userA.Id, conversationId, new UpdateNotificationSettingsRequest { IsMuted = true })).IsMuted);
+        }
+
         var filterResult = await ExecuteJsonValidationFilterAsync(rawPayload);
         var badRequest = Assert.IsType<BadRequestObjectResult>(filterResult);
         Assert.Equal(400, badRequest.StatusCode);
@@ -467,6 +493,14 @@ public sealed class ConversationNotificationSettingsTests
                 JsonSerializer.Deserialize<UpdateNotificationSettingsRequest>(
                     rawPayload,
                     new JsonSerializerOptions { PropertyNameCaseInsensitive = true }));
+        }
+
+        await using (var verifyDb = CreateInMemoryDbContext(dbName))
+        {
+            var service = new ConversationSettingsService(verifyDb);
+            Assert.True((await service.GetAsync(userA.Id, conversationId)).IsMuted);
+            Assert.Equal(0, await verifyDb.ConversationNotificationSettings.CountAsync(
+                s => s.ConversationId == conversationId && s.UserId == userB.Id));
         }
     }
 
