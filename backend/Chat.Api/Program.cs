@@ -209,7 +209,7 @@ builder.Services.AddScoped<IPendingFileCleanupService, PendingFileCleanupService
 // Sprint 3 DI: enable each registration when its interface and implementation exist.
 // builder.Services.AddScoped<IProfileService, ProfileService>();
 // builder.Services.AddScoped<IAttachmentMessageService, AttachmentMessageService>();
-// builder.Services.AddScoped<IConversationSettingsService, ConversationSettingsService>();
+builder.Services.AddScoped<IConversationSettingsService, ConversationSettingsService>();
 // builder.Services.AddScoped<IMessageReceiptService, MessageReceiptService>();
 
 var app = builder.Build();
