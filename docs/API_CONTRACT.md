@@ -636,6 +636,17 @@ Quy định:
 - Không trả Email.
 - Giữ DTO tìm kiếm cũ; FE lấy thêm hồ sơ theo ID của kết quả đang hiển thị.
 
+Chi tiết CHAT-25:
+
+- Có Avatar: `avatarUrl` là `/api/users/{userId}/avatar`; chưa có: `null`. API ảnh trả `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`; không yêu cầu query version.
+- Hai GET hồ sơ/Avatar yêu cầu đăng nhập; Blocks không cấm đọc các trường công khai này. Không áp dụng quyền xem tin nhắn cho hồ sơ.
+- User không tồn tại: `404 USER_NOT_FOUND`. User tồn tại nhưng chưa có Avatar hoặc nội dung ảnh đã mất: `404 ATTACHMENT_NOT_FOUND` ở API ảnh.
+- PUT hồ sơ là cập nhật cả `displayName` và `bio`; `bio: ""` xóa Bio. Thiếu/null trường bắt buộc trả 400; không tự thay bằng giá trị rỗng. Tên không hợp lệ dùng `INVALID_DISPLAY_NAME`, Bio không hợp lệ dùng `INVALID_BIO`.
+- PUT Avatar dùng đúng một trường `file`, kiểm tra nội dung ảnh thực tế và giới hạn 2.097.152 byte. Rỗng/sai multipart: `400 VALIDATION_ERROR`; quá dung lượng: `413 FILE_TOO_LARGE`; sai loại: `415 UNSUPPORTED_FILE_TYPE`.
+- Lưu Avatar bằng `IFileStorage` của CHAT-24. Trong cùng transaction: file mới thành `Active`, đổi `Users.AvatarFileId`, file cũ thành `Inactive`. DELETE đặt tham chiếu null và chuyển file cũ thành `Inactive`; chưa có Avatar vẫn trả 204.
+- Chỉ xóa file vật lý cũ sau commit thành công; chỉ xóa khi file không còn được tham chiếu. Lỗi xóa ghi log, giữ metadata để xử lý lại, không trả lỗi đổi Avatar khi transaction đã thành công. Khi transaction thất bại, dọn file mới chưa được sử dụng.
+- Cleanup CHAT-24 chỉ dọn `Pending` không có liên kết, không tự dọn Avatar `Inactive`. Không mở rộng cleanup để xóa file đang dùng.
+
 ### 3. Tin nhắn và file
 
 Giữ nguyên API Messages cũ, bổ sung:
@@ -705,6 +716,20 @@ Quy định:
 - Kiểm tra loại file thực tế; không công khai thư mục lưu file.
 - Chỉ phát `ConversationChanged` sau khi lưu tin và liên kết file commit thành công.
 
+Chi tiết CHAT-24/CHAT-26:
+
+- Một lần upload một file; upload chỉ tạo StoredFiles `Pending`, chưa tạo tin hoặc phát event. File Pending chỉ uploader còn quyền hội thoại được xem/tải.
+- File Attached chỉ được xem/tải khi người gọi được xem tin liên kết, bao gồm `JoinedSeq`, membership và Blocks. Direct giữ quy tắc Sprint 1; Group lọc theo người gửi đã chặn người xem, không cấm toàn nhóm.
+- Content/download trả MIME kiểm tra từ nội dung, `Cache-Control: private, no-store`, `X-Content-Type-Options: nosniff`; không trả storage key hoặc đường dẫn máy chủ.
+- Dọn Pending thủ công theo cutoff/limit do người vận hành chọn; khóa và kiểm tra lại trạng thái/liên kết trước khi xóa. Không tự dọn sau 24 giờ; không xóa Attached hoặc Avatar đang dùng. Cấu hình và lệnh: [CHAT24_STORAGE.md](CHAT24_STORAGE.md).
+- Endpoint gửi kèm file yêu cầu `attachmentIds` có 1–5 Guid khác nhau, không rỗng; trùng ID/thiếu danh sách/sai số lượng: `400 INVALID_ATTACHMENT_COUNT`. `clientMessageId` không được là Guid rỗng; lỗi dữ liệu khác: `400 VALIDATION_ERROR`.
+- Tra tin theo khóa chống trùng `(conversationId, senderUserId, clientMessageId)` trước khi yêu cầu file còn Pending. Retry cùng body và cùng tập ID file trả 200 với tin cũ, không thêm Seq/liên kết hoặc phát lại event. Thứ tự ID không làm thay đổi tập file; response sắp xếp attachments theo `id` để ổn định.
+- Cùng ClientMessageId nhưng khác body hoặc tập file: `409 CLIENT_MESSAGE_ID_CONFLICT`, kể cả khi đổi giữa API tin văn bản và API tin kèm file. Tin văn bản và tin kèm file dùng chung khóa chống trùng.
+- Tạo mới: file không tồn tại dùng `404 ATTACHMENT_NOT_FOUND`; file sai uploader/hội thoại/quyền dùng `403 CONVERSATION_ACCESS_DENIED`; file đã gắn vào tin khác dùng `409 ATTACHMENT_ALREADY_USED`. Chỉ được gắn file `UsageType=Attachment`, trạng thái Pending.
+- Tạo Messages, cấp Seq, chuyển Pending → Attached và tạo liên kết phải nằm cùng transaction. Hai request tranh chấp cùng file: chỉ một thành công; request còn lại trả 409, không để lại tin rỗng/liên kết dở dang.
+- `attachment-details`: thiếu/rỗng/sai Guid/trên 100 ID trả `400 VALIDATION_ERROR`; ID lặp được xử lý một lần. Tin không tồn tại trả `404 NOT_FOUND`; tin sai hội thoại/không có quyền trả `403 CONVERSATION_ACCESS_DENIED`. Từ chối toàn request, không trả dữ liệu một phần.
+- Trả một `AttachmentMessageDto` cho mỗi tin hợp lệ được hỏi, kể cả `attachments: []` cho tin văn bản; thứ tự theo lần xuất hiện đầu tiên của messageIds. Không thay response phân trang Messages cũ.
+
 ### 4. Thông báo từng hội thoại
 
 ```text
@@ -724,6 +749,15 @@ Request và response `200`:
 - Lưu riêng theo người dùng và hội thoại.
 - Mute chỉ tắt âm thanh/banner; vẫn nhận và lưu tin bình thường.
 - Không thay đổi Join/Leave hoặc quyền truy cập.
+
+Chi tiết CHAT-27:
+
+- Cả GET/PUT yêu cầu đăng nhập và kiểm tra quyền hội thoại hiện tại. Group yêu cầu nhóm đang hoạt động và membership còn hiệu lực; Direct dùng quyền truy cập hội thoại Sprint 1–2.
+- Chưa có bản ghi cài đặt thì GET trả `200 {"isMuted":false}`; không bắt buộc tạo row khi GET. PUT tạo/cập nhật đúng khóa `(ConversationId, UserId)` lấy user từ phiên đăng nhập.
+- PUT yêu cầu có `isMuted` kiểu boolean; thiếu/null/sai kiểu trả `400 VALIDATION_ERROR`. PUT cùng giá trị là idempotent.
+- Hội thoại không tồn tại trả `404 NOT_FOUND`; không có quyền trả `403 CONVERSATION_ACCESS_DENIED` hoặc mã quyền nhóm hiện có.
+- Một tài khoản dùng chung cài đặt trên mọi thiết bị. Thiết bị khác đọc lại API khi mở hội thoại/reconnect; không bắt buộc event mới.
+- Không dùng IsMuted để lọc người nhận SignalR, chặn lưu/đồng bộ tin, hoặc ngừng receipts. FE chỉ tắt âm thanh/banner.
 
 ### 5. Đã nhận và đã xem
 
@@ -779,6 +813,16 @@ Quy định:
 - Không suy ra đã xem tin bị Blocks ẩn.
 - Nhóm hiển thị tên người đã xem, ví dụ **“B, C đã xem”**, không tính người gửi.
 
+Chi tiết CHAT-28:
+
+- GET/PUT yêu cầu quyền hội thoại hiện tại. GET trả mốc của các thành viên đang hoạt động; user đã rời/bị xóa không tiếp tục nhận event. Không thêm Email hoặc thông tin Identity vào response.
+- PUT chỉ cập nhật mốc của user đăng nhập, không nhận userId tùy ý từ body. Thiếu/null/sai kiểu/âm/vượt LastMessageSeq dùng `400 INVALID_RECEIPT_SEQ`.
+- Seq bằng 0 hoặc thấp hơn/bằng mốc đã lưu là no-op, trả mốc hiện tại sau khi kiểm tra quyền. Mốc dương mới phải trỏ đến tin thực sự tồn tại và người gọi được xem, bao gồm JoinedSeq/Blocks; không dùng riêng LastMessageSeq để chứng minh quyền.
+- Mốc cập nhật đồng thời dùng giá trị lớn nhất; MarkRead nâng delivered nếu cần trong cùng transaction. Event chỉ phát khi mốc thay đổi và commit thành công; retry không bắt buộc phát lại event.
+- Tên người đã xem một tin chỉ lấy trong các thành viên khác người gửi, còn quyền xem tin đó, kết hợp mốc và quy tắc Blocks. Không phát toàn bộ mốc receipts cho connection chưa Join hoặc đã mất quyền.
+
+**Điểm chưa chốt trước khi triển khai CHAT-28:** hai mốc tổng không lưu được lịch sử từng tin bị Blocks ẩn. Ví dụ Seq 10 bị ẩn nhưng Seq 11 đã xem; sau khi bỏ chặn, chỉ `readSeq=11` không chứng minh đã xem Seq 10. Không được tự coi tin vừa hiện lại là đã xem. Leader và người phụ trách receipts cần chốt cách lưu/diễn giải trạng thái này; nếu cần đổi schema phải qua owner Database bằng migration mới. Các endpoint/DTO phía trên giữ nguyên trong khi chốt giải pháp.
+
 ### 6. SignalR
 
 Giữ Hub `/hubs/chat` và event `ConversationChanged`:
@@ -830,3 +874,28 @@ Response lỗi giữ cấu trúc:
 | 500 | `INTERNAL_ERROR` — thông báo chung, chi tiết ghi log |
 
 Cookie và CSRF áp dụng cả upload multipart.
+
+### 8. Tìm bạn bè để mở chat — CHAT-30
+
+```text
+GET /api/friendships/search?keyword=...&page=1&pageSize=10
+```
+
+Yêu cầu đăng nhập; GET không yêu cầu CSRF. Thành công trả 200:
+
+```json
+{
+  "items": [{"id":"Guid","username":"user01","displayName":"Nguyễn Văn A"}],
+  "page": 1,
+  "pageSize": 10,
+  "totalCount": 1,
+  "totalPages": 1
+}
+```
+
+- Chỉ tìm trong quan hệ Friendships Accepted của người gọi, không trả Pending/Rejected/Cancelled hoặc người chưa kết bạn.
+- Tìm chuỗi con username hoặc displayName, không phân biệt hoa/thường; trim keyword. Bỏ keyword/rỗng/toàn khoảng trắng trả danh sách bạn bè. Các ký tự `%`, `_`, `\` được hiểu nguyên văn, không làm wildcard.
+- Mặc định page=1, pageSize=10; page >= 1, pageSize từ 1–100. Sai khoảng trả `400 INVALID_PAGE`/`INVALID_PAGE_SIZE`; sai kiểu hoặc vượt kiểu Int32 trả `400 VALIDATION_ERROR` theo model validation hiện có.
+- Sắp xếp username tăng dần, sau đó id. TotalCount tính sau lọc, trước phân trang; totalPages = ceil(totalCount/pageSize), không có kết quả thì totalPages=0. Trang vượt cuối vẫn 200, giữ page/pageSize và tổng, items rỗng.
+- DTO dùng `SearchFriendDto` và `PagedFriendSearchResponse`, chỉ chứa các trường ở ví dụ; không thêm Email/PasswordHash. Không thay response Users/Friendships cũ.
+- Mở chat dùng lại `POST /api/conversations/direct`. Tạo mới yêu cầu Accepted và không bị chặn; hội thoại cũ dùng quyền xem lịch sử hiện có. Gửi tin vẫn kiểm tra lại Accepted/Blocks tại Backend, không tin trạng thái vừa lấy từ search.

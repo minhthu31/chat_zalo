@@ -73,6 +73,21 @@
 API/DTO: [API_CONTRACT.md](API_CONTRACT.md#sprint-3).
 DI: [Backend Program.cs](../backend/Chat.Api/Program.cs), [Frontend Program.cs](../frontend/Program.cs).
 
+### Đầu mối Backend Sprint 3
+
+| Task | Interface dùng chung | FE sử dụng |
+|---|---|---|
+| CHAT-24 | IAttachmentService, IFileStorage | Upload từng file, dùng URL content/download có Cookie |
+| CHAT-25 | IProfileService, IAvatarService; tái sử dụng IFileStorage | ProfileDto; AvatarUrl null khi chưa có, không công khai Email |
+| CHAT-26 | IAttachmentMessageService | Gửi attachmentIds; ghép attachment-details theo messageId |
+| CHAT-27 | IConversationSettingsService | Lưu IsMuted theo tài khoản/hội thoại; vẫn đồng bộ tin qua SignalR |
+| CHAT-28 | IMessageReceiptService | Xác nhận delivered/read sau khi nhận/đọc, không dựa vào trạng thái online |
+| CHAT-30 | IFriendshipService.SearchFriendsAsync | GET friendships/search, pageSize mặc định 10; chỉ bạn Accepted |
+
+Backend đăng ký Scoped cho implementation đã có; CHAT-25 cần cả IProfileService và IAvatarService. Không tạo IFileStorage hoặc bảng Users riêng. Dòng DI đang comment là hướng dẫn cho task chưa triển khai, chỉ bật khi có implementation.
+
+DTO/mã lỗi và các trường hợp chi tiết tra API_CONTRACT.md; không tự đổi endpoint hoặc thêm Email vào DTO. Điểm receipts sau khi bỏ chặn còn chờ chốt CHAT-28; chưa được mặc định đánh dấu đã xem tin vừa hiện lại dựa riêng vào readSeq.
+
 ### Kế thừa Sprint 1–2
 
 | Phần hiện có | Sprint 3 |
