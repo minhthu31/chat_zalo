@@ -195,15 +195,37 @@ builder.Services.AddScoped<IConversationEventPublisher>(services =>
     services.GetRequiredService<ChatNotificationService>());
 
    builder.Services.AddGroupPermissions();
-   // Sprint 3 DI: enable each registration when its interface and implementation exist.
+var webRoot = Path.GetFullPath(builder.Environment.WebRootPath ?? Path.Combine(builder.Environment.ContentRootPath, "wwwroot"));
+builder.Services.AddOptions<FileStorageOptions>().Bind(configuration.GetSection("FileStorage"))
+    .Validate(options => Path.IsPathFullyQualified(options.RootPath)
+        && !Path.GetFullPath(options.RootPath).TrimEnd(Path.DirectorySeparatorChar).Equals(webRoot.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase)
+        && !Path.GetFullPath(options.RootPath).StartsWith(webRoot.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase),
+        "FileStorage:RootPath must be an absolute private directory outside wwwroot.")
+    .ValidateOnStart();
+builder.Services.AddScoped<IFileStorage, LocalFileStorage>();
+builder.Services.AddScoped<IAttachmentService, AttachmentService>();
+builder.Services.AddScoped<IPendingFileCleanupService, PendingFileCleanupService>();
+
+// Sprint 3 DI: enable each registration when its interface and implementation exist.
 // builder.Services.AddScoped<IProfileService, ProfileService>();
-// builder.Services.AddScoped<IAttachmentService, AttachmentService>();
 // builder.Services.AddScoped<IAttachmentMessageService, AttachmentMessageService>();
 // builder.Services.AddScoped<IConversationSettingsService, ConversationSettingsService>();
 // builder.Services.AddScoped<IMessageReceiptService, MessageReceiptService>();
-// builder.Services.AddScoped<IFileStorage, LocalFileStorage>();
 
 var app = builder.Build();
+
+// Manual operator command; this mode does not start an HTTP server.
+if (configuration.GetValue<bool>("cleanup-pending"))
+{
+    if (!DateTimeOffset.TryParse(configuration["cleanup-before"], System.Globalization.CultureInfo.InvariantCulture,
+        System.Globalization.DateTimeStyles.AssumeUniversal, out var cutoff))
+        throw new ArgumentException("Provide --cleanup-before with an ISO-8601 UTC cutoff.");
+    using var scope = app.Services.CreateScope();
+    var removed = await scope.ServiceProvider.GetRequiredService<IPendingFileCleanupService>()
+        .CleanupAsync(cutoff.ToUniversalTime(), configuration.GetValue<int?>("cleanup-limit") ?? 100);
+    Console.WriteLine($"Removed {removed} unused Pending files.");
+    return;
+}
 
 // Middleware order: CORS -> Authentication -> Authorization
 app.UseCors("Frontend");
