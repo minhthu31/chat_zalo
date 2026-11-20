@@ -193,6 +193,8 @@ builder.Services.AddScoped<IChatNotificationService>(services =>
     services.GetRequiredService<ChatNotificationService>());
 builder.Services.AddScoped<IConversationEventPublisher>(services =>
     services.GetRequiredService<ChatNotificationService>());
+builder.Services.AddScoped<IReceiptEventPublisher>(services =>
+    services.GetRequiredService<ChatNotificationService>());
 
    builder.Services.AddGroupPermissions();
 var webRoot = Path.GetFullPath(builder.Environment.WebRootPath ?? Path.Combine(builder.Environment.ContentRootPath, "wwwroot"));
@@ -210,7 +212,7 @@ builder.Services.AddScoped<IPendingFileCleanupService, PendingFileCleanupService
 // builder.Services.AddScoped<IProfileService, ProfileService>();
 // builder.Services.AddScoped<IAttachmentMessageService, AttachmentMessageService>();
 // builder.Services.AddScoped<IConversationSettingsService, ConversationSettingsService>();
-// builder.Services.AddScoped<IMessageReceiptService, MessageReceiptService>();
+builder.Services.AddScoped<IMessageReceiptService, MessageReceiptService>();
 
 var app = builder.Build();
 
