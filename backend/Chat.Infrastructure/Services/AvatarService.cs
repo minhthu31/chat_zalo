@@ -105,6 +105,8 @@ public sealed class AvatarService(
                 throw new ProfileServiceException(404, "USER_NOT_FOUND", "User not found.");
             }
 
+            await db.Entry(user).ReloadAsync(cancellationToken);
+
             var newFile = new StoredFile
             {
                 UploadedByUserId = currentUserId,
@@ -123,6 +125,7 @@ public sealed class AvatarService(
                 var oldFile = await db.StoredFiles.FirstOrDefaultAsync(f => f.Id == user.AvatarFileId.Value, cancellationToken);
                 if (oldFile != null)
                 {
+                    await db.Entry(oldFile).ReloadAsync(cancellationToken);
                     oldFile.Status = "Inactive";
                     oldStorageKey = oldFile.StorageKey;
                 }
@@ -205,6 +208,8 @@ public sealed class AvatarService(
                 throw new ProfileServiceException(404, "USER_NOT_FOUND", "User not found.");
             }
 
+            await db.Entry(user).ReloadAsync(cancellationToken);
+
             if (!user.AvatarFileId.HasValue)
             {
                 if (tx != null) await tx.CommitAsync(cancellationToken);
@@ -214,6 +219,7 @@ public sealed class AvatarService(
             var oldFile = await db.StoredFiles.FirstOrDefaultAsync(f => f.Id == user.AvatarFileId.Value, cancellationToken);
             if (oldFile != null)
             {
+                await db.Entry(oldFile).ReloadAsync(cancellationToken);
                 oldFile.Status = "Inactive";
                 oldStorageKey = oldFile.StorageKey;
             }

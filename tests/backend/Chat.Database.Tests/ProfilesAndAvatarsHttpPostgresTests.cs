@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using Chat.Api.Controllers;
+using Chat.Application.Interfaces;
 using Chat.Domain.Entities;
 using Chat.Infrastructure.Data;
 using Microsoft.AspNetCore.Hosting;
@@ -77,7 +78,17 @@ public class ProfilesAndAvatarsHttpPostgresTests
         public async Task<HttpResponseMessage> Send(HttpMethod method, string path, object? body = null, bool csrf = true, bool invalidCsrf = false)
         {
             var request = new HttpRequestMessage(method, path);
-            if (body is not null) request.Content = JsonContent.Create(body);
+            if (body is not null)
+            {
+                if (body is string rawJson)
+                {
+                    request.Content = new StringContent(rawJson, Encoding.UTF8, "application/json");
+                }
+                else
+                {
+                    request.Content = JsonContent.Create(body);
+                }
+            }
             if (method != HttpMethod.Get && csrf)
             {
                 var token = (await Json(await client.GetAsync("/api/auth/csrf"))).GetProperty("token").GetString();
@@ -369,5 +380,226 @@ public class ProfilesAndAvatarsHttpPostgresTests
         // 9. Gọi DELETE lần nữa khi chưa có avatar -> vẫn trả 204 (idempotent)
         var deleteAgain = await a.Send(HttpMethod.Delete, "/api/users/me/avatar");
         Assert.Equal(HttpStatusCode.NoContent, deleteAgain.StatusCode);
+    }
+
+    [Fact]
+    public async Task UpdateProfile_MissingOrNullBio_Returns400_AndPreservesExistingData()
+    {
+        using var factory = new Factory();
+        factory.UseKestrel(options => options.Listen(IPAddress.Loopback, 0));
+
+        using var a = new Session(factory);
+        var aid = await a.Register();
+
+        // Cập nhật sẵn user có DisplayName và Bio không rỗng
+        var initial = await a.Send(HttpMethod.Put, "/api/users/me/profile", new
+        {
+            displayName = "Ten ban dau",
+            bio = "Bio cu can giu nguyen"
+        });
+        Assert.Equal(HttpStatusCode.OK, initial.StatusCode);
+
+        // Gửi PUT /api/users/me/profile với raw JSON {"displayName":"Ten moi"} (thiếu hẳn key bio)
+        // -> assert HTTP 400 (INVALID_BIO)
+        var missingBio = await a.Send(HttpMethod.Put, "/api/users/me/profile", "{\"displayName\":\"Ten moi\"}");
+        await Error(missingBio, HttpStatusCode.BadRequest, "INVALID_BIO");
+
+        // Kiểm tra lại DB và GET /api/users/{id}/profile xác nhận cả DisplayName lẫn Bio cũ vẫn giữ nguyên 100%
+        var profileAfterMissing = await a.Send(HttpMethod.Get, $"/api/users/{aid}/profile");
+        Assert.Equal(HttpStatusCode.OK, profileAfterMissing.StatusCode);
+        var jsonAfterMissing = await Json(profileAfterMissing);
+        Assert.Equal("Ten ban dau", jsonAfterMissing.GetProperty("displayName").GetString());
+        Assert.Equal("Bio cu can giu nguyen", jsonAfterMissing.GetProperty("bio").GetString());
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ChatDbContext>();
+            var user = await db.Users.SingleAsync(u => u.Id == aid);
+            Assert.Equal("Ten ban dau", user.DisplayName);
+            Assert.Equal("Bio cu can giu nguyen", user.Bio);
+        }
+
+        // Gửi PUT /api/users/me/profile với raw JSON {"displayName":"Ten moi","bio":null}
+        // -> assert HTTP 400 (INVALID_BIO), dữ liệu DB giữ nguyên
+        var nullBio = await a.Send(HttpMethod.Put, "/api/users/me/profile", "{\"displayName\":\"Ten moi\",\"bio\":null}");
+        await Error(nullBio, HttpStatusCode.BadRequest, "INVALID_BIO");
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ChatDbContext>();
+            var user = await db.Users.SingleAsync(u => u.Id == aid);
+            Assert.Equal("Ten ban dau", user.DisplayName);
+            Assert.Equal("Bio cu can giu nguyen", user.Bio);
+        }
+
+        // Gửi PUT /api/users/me/profile với {"displayName":"Ten moi","bio":""}
+        // -> assert HTTP 200, Bio được cập nhật thành ""
+        var emptyBio = await a.Send(HttpMethod.Put, "/api/users/me/profile", "{\"displayName\":\"Ten moi\",\"bio\":\"\"}");
+        Assert.Equal(HttpStatusCode.OK, emptyBio.StatusCode);
+        var jsonAfterEmpty = await Json(emptyBio);
+        Assert.Equal("Ten moi", jsonAfterEmpty.GetProperty("displayName").GetString());
+        Assert.Equal("", jsonAfterEmpty.GetProperty("bio").GetString());
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ChatDbContext>();
+            var user = await db.Users.SingleAsync(u => u.Id == aid);
+            Assert.Equal("Ten moi", user.DisplayName);
+            Assert.Equal("", user.Bio);
+        }
+    }
+
+    [Fact]
+    public async Task AvatarService_StaleTrackedUser_RemoveAsync_ReloadsAndRemovesActiveAvatar()
+    {
+        using var factory = new Factory();
+        factory.UseKestrel(options => options.Listen(IPAddress.Loopback, 0));
+
+        using var a = new Session(factory);
+        var aid = await a.Register();
+
+        using var scope1 = factory.Services.CreateScope();
+        using var scope2 = factory.Services.CreateScope();
+        var db1 = scope1.ServiceProvider.GetRequiredService<ChatDbContext>();
+        var db2 = scope2.ServiceProvider.GetRequiredService<ChatDbContext>();
+        var service1 = scope1.ServiceProvider.GetRequiredService<IAvatarService>();
+        var service2 = scope2.ServiceProvider.GetRequiredService<IAvatarService>();
+
+        // 1. db1 load sẵn ApplicationUser (tracked, AvatarFileId == null)
+        var trackedUserInDb1 = await db1.Users.SingleAsync(u => u.Id == aid);
+        Assert.Null(trackedUserInDb1.AvatarFileId);
+
+        // 2. db2 gọi AvatarService.SetAsync tạo Avatar A (Active)
+        using var streamA = new MemoryStream(ValidPngBytes);
+        var setResA = await service2.SetAsync(aid, "avatarA.png", "image/png", ValidPngBytes.Length, streamA);
+        Assert.NotNull(setResA.AvatarUrl);
+
+        Guid avatarAId;
+        string storageKeyA;
+        using (var verifyScope = factory.Services.CreateScope())
+        {
+            var verifyDb = verifyScope.ServiceProvider.GetRequiredService<ChatDbContext>();
+            var user = await verifyDb.Users.SingleAsync(u => u.Id == aid);
+            Assert.NotNull(user.AvatarFileId);
+            avatarAId = user.AvatarFileId.Value;
+            var fileA = await verifyDb.StoredFiles.SingleAsync(f => f.Id == avatarAId);
+            Assert.Equal("Active", fileA.Status);
+            storageKeyA = fileA.StorageKey;
+        }
+        Assert.True(File.Exists(Path.Combine(factory.StoragePath, storageKeyA)));
+
+        // 3. db1 vẫn đang giữ trackedUserInDb1 với AvatarFileId == null.
+        // Gọi service1.RemoveAsync trên db1 -> nhờ ReloadAsync, nó phải nhận ra Avatar A và chuyển sang Inactive!
+        await service1.RemoveAsync(aid);
+
+        using (var verifyScope = factory.Services.CreateScope())
+        {
+            var verifyDb = verifyScope.ServiceProvider.GetRequiredService<ChatDbContext>();
+            var user = await verifyDb.Users.SingleAsync(u => u.Id == aid);
+            Assert.Null(user.AvatarFileId);
+
+            var fileA = await verifyDb.StoredFiles.SingleAsync(f => f.Id == avatarAId);
+            Assert.Equal("Inactive", fileA.Status);
+        }
+        Assert.False(File.Exists(Path.Combine(factory.StoragePath, storageKeyA)));
+    }
+
+    [Fact]
+    public async Task AvatarService_StaleTrackedUser_SetAsync_ReloadsAndInactivatesOldAvatar()
+    {
+        using var factory = new Factory();
+        factory.UseKestrel(options => options.Listen(IPAddress.Loopback, 0));
+
+        using var a = new Session(factory);
+        var aid = await a.Register();
+
+        using var scope1 = factory.Services.CreateScope();
+        using var scope2 = factory.Services.CreateScope();
+        var db1 = scope1.ServiceProvider.GetRequiredService<ChatDbContext>();
+        var db2 = scope2.ServiceProvider.GetRequiredService<ChatDbContext>();
+        var service1 = scope1.ServiceProvider.GetRequiredService<IAvatarService>();
+        var service2 = scope2.ServiceProvider.GetRequiredService<IAvatarService>();
+
+        // 1. db1 load sẵn ApplicationUser (tracked, AvatarFileId == null)
+        var trackedUserInDb1 = await db1.Users.SingleAsync(u => u.Id == aid);
+        Assert.Null(trackedUserInDb1.AvatarFileId);
+
+        // 2. db2 gọi AvatarService.SetAsync tạo Avatar A (Active)
+        using var streamA = new MemoryStream(ValidPngBytes);
+        await service2.SetAsync(aid, "avatarA.png", "image/png", ValidPngBytes.Length, streamA);
+
+        Guid avatarAId;
+        string storageKeyA;
+        using (var verifyScope = factory.Services.CreateScope())
+        {
+            var verifyDb = verifyScope.ServiceProvider.GetRequiredService<ChatDbContext>();
+            var user = await verifyDb.Users.SingleAsync(u => u.Id == aid);
+            Assert.NotNull(user.AvatarFileId);
+            avatarAId = user.AvatarFileId.Value;
+            var fileA = await verifyDb.StoredFiles.SingleAsync(f => f.Id == avatarAId);
+            Assert.Equal("Active", fileA.Status);
+            storageKeyA = fileA.StorageKey;
+        }
+        Assert.True(File.Exists(Path.Combine(factory.StoragePath, storageKeyA)));
+
+        // 3. db1 gọi SetAsync với Avatar B. Nhờ ReloadAsync, db1 nhận ra Avatar A cũ và chuyển sang Inactive!
+        using var streamB = new MemoryStream(ValidJpegBytes);
+        await service1.SetAsync(aid, "avatarB.jpg", "image/jpeg", ValidJpegBytes.Length, streamB);
+
+        using (var verifyScope = factory.Services.CreateScope())
+        {
+            var verifyDb = verifyScope.ServiceProvider.GetRequiredService<ChatDbContext>();
+            var user = await verifyDb.Users.SingleAsync(u => u.Id == aid);
+            Assert.NotNull(user.AvatarFileId);
+            Assert.NotEqual(avatarAId, user.AvatarFileId.Value);
+
+            // Chỉ có DUY NHẤT 1 StoredFile Active
+            var activeFiles = await verifyDb.StoredFiles.Where(f => f.UploadedByUserId == aid && f.UsageType == "Avatar" && f.Status == "Active").ToListAsync();
+            var singleActive = Assert.Single(activeFiles);
+            Assert.Equal(user.AvatarFileId.Value, singleActive.Id);
+
+            var fileA = await verifyDb.StoredFiles.SingleAsync(f => f.Id == avatarAId);
+            Assert.Equal("Inactive", fileA.Status);
+        }
+        Assert.False(File.Exists(Path.Combine(factory.StoragePath, storageKeyA)));
+    }
+
+    [Fact]
+    public async Task AvatarUpload_ConcurrentPuts_ResolvesCleanly_WithExactlyOneActiveStoredFile()
+    {
+        using var factory = new Factory();
+        factory.UseKestrel(options => options.Listen(IPAddress.Loopback, 0));
+
+        using var a1 = new Session(factory);
+        var aid = await a1.Register();
+        using var a2 = new Session(factory);
+        // a2 login as the same user
+        var name = (await Json(await a1.Send(HttpMethod.Get, $"/api/users/{aid}/profile"))).GetProperty("username").GetString()!;
+        var loginRes = await a2.Send(HttpMethod.Post, "/api/auth/login", new { usernameOrEmail = name, password = "Review123!" });
+        Assert.Equal(HttpStatusCode.OK, loginRes.StatusCode);
+
+        // Gửi đồng thời 2 request PUT /api/users/me/avatar bằng Task.WhenAll cho cùng một user
+        var t1 = a1.UploadAvatar(ValidPngBytes, filename: "avatar1.png", type: "image/png");
+        var t2 = a2.UploadAvatar(ValidJpegBytes, filename: "avatar2.jpg", type: "image/jpeg");
+
+        var responses = await Task.WhenAll(t1, t2);
+        Assert.All(responses, r => Assert.Equal(HttpStatusCode.OK, r.StatusCode));
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ChatDbContext>();
+            var user = await db.Users.SingleAsync(u => u.Id == aid);
+            Assert.NotNull(user.AvatarFileId);
+
+            var avatarFiles = await db.StoredFiles.Where(f => f.UploadedByUserId == aid && f.UsageType == "Avatar").ToListAsync();
+            Assert.Equal(2, avatarFiles.Count);
+
+            var activeFiles = avatarFiles.Where(f => f.Status == "Active").ToList();
+            var singleActive = Assert.Single(activeFiles);
+            Assert.Equal(user.AvatarFileId.Value, singleActive.Id);
+
+            var inactiveFiles = avatarFiles.Where(f => f.Status == "Inactive").ToList();
+            Assert.Single(inactiveFiles);
+        }
     }
 }

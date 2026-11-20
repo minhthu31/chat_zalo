@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.Json;
 using Chat.Api.Filters;
 using Chat.Application.DTOs.Profiles;
 using Chat.Application.Interfaces;
@@ -43,11 +44,47 @@ public sealed class ProfilesController(
 
     [HttpPut("me/profile")]
     [ValidateAntiforgeryJson]
-    public async Task<IActionResult> UpdateProfile([FromBody] UpdatePublicProfileRequest request, CancellationToken ct)
+    public async Task<IActionResult> UpdateProfile([FromBody] JsonElement body, CancellationToken ct)
     {
         if (!TryUser(out var currentUserId)) return Unauthorized();
         try
         {
+            if (body.ValueKind != JsonValueKind.Object)
+            {
+                return BadRequest(new { code = "VALIDATION_ERROR", message = "Invalid JSON object." });
+            }
+
+            JsonProperty? displayNameProp = null;
+            JsonProperty? bioProp = null;
+
+            foreach (var prop in body.EnumerateObject())
+            {
+                if (string.Equals(prop.Name, "displayName", StringComparison.OrdinalIgnoreCase))
+                {
+                    displayNameProp = prop;
+                }
+                else if (string.Equals(prop.Name, "bio", StringComparison.OrdinalIgnoreCase))
+                {
+                    bioProp = prop;
+                }
+            }
+
+            if (!displayNameProp.HasValue || displayNameProp.Value.Value.ValueKind != JsonValueKind.String)
+            {
+                return BadRequest(new { code = "INVALID_DISPLAY_NAME", message = "DisplayName is required and must be a string." });
+            }
+
+            if (!bioProp.HasValue || bioProp.Value.Value.ValueKind != JsonValueKind.String)
+            {
+                return BadRequest(new { code = "INVALID_BIO", message = "Bio is required and must be a string." });
+            }
+
+            var request = new UpdatePublicProfileRequest
+            {
+                DisplayName = displayNameProp.Value.Value.GetString()!,
+                Bio = bioProp.Value.Value.GetString()!
+            };
+
             var profile = await profileService.UpdateAsync(currentUserId, request, ct);
             return Ok(profile);
         }

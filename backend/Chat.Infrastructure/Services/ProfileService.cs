@@ -38,13 +38,23 @@ public sealed class ProfileService(ChatDbContext db) : IProfileService
             throw new ProfileServiceException(400, "VALIDATION_ERROR", "Invalid profile update request.");
         }
 
-        var displayName = (request.DisplayName ?? string.Empty).Trim();
+        if (request.DisplayName is null)
+        {
+            throw new ProfileServiceException(400, "INVALID_DISPLAY_NAME", "DisplayName is required and must be a string.");
+        }
+
+        var displayName = request.DisplayName.Trim();
         if (displayName.Length < 1 || displayName.Length > 50)
         {
             throw new ProfileServiceException(400, "INVALID_DISPLAY_NAME", "Display name must be between 1 and 50 characters.");
         }
 
-        var bio = request.Bio ?? string.Empty;
+        if (request.Bio is null)
+        {
+            throw new ProfileServiceException(400, "INVALID_BIO", "Bio is required and must be a string.");
+        }
+
+        var bio = request.Bio;
         if (bio.Length > 200)
         {
             throw new ProfileServiceException(400, "INVALID_BIO", "Bio must not exceed 200 characters.");

@@ -113,6 +113,11 @@ public class ProfileAndAvatarServiceTests
         await Assert.ThrowsAsync<ProfileServiceException>(() => service.UpdateAsync(Guid.Empty, new UpdatePublicProfileRequest()));
         await Assert.ThrowsAsync<ProfileServiceException>(() => service.UpdateAsync(user.Id, null!));
 
+        // DisplayName null
+        var exNullName = await Assert.ThrowsAsync<ProfileServiceException>(() =>
+            service.UpdateAsync(user.Id, new UpdatePublicProfileRequest { DisplayName = null!, Bio = "Bio" }));
+        Assert.Equal("INVALID_DISPLAY_NAME", exNullName.Code);
+
         // DisplayName empty or whitespace
         var exEmpty = await Assert.ThrowsAsync<ProfileServiceException>(() =>
             service.UpdateAsync(user.Id, new UpdatePublicProfileRequest { DisplayName = "" }));
@@ -127,10 +132,24 @@ public class ProfileAndAvatarServiceTests
             service.UpdateAsync(user.Id, new UpdatePublicProfileRequest { DisplayName = new string('a', 51) }));
         Assert.Equal("INVALID_DISPLAY_NAME", exLongName.Code);
 
+        // Bio null
+        var exNullBio = await Assert.ThrowsAsync<ProfileServiceException>(() =>
+            service.UpdateAsync(user.Id, new UpdatePublicProfileRequest { DisplayName = "Valid Name", Bio = null! }));
+        Assert.Equal("INVALID_BIO", exNullBio.Code);
+
         // Bio > 200 chars
         var exLongBio = await Assert.ThrowsAsync<ProfileServiceException>(() =>
             service.UpdateAsync(user.Id, new UpdatePublicProfileRequest { DisplayName = "Valid Name", Bio = new string('b', 201) }));
         Assert.Equal("INVALID_BIO", exLongBio.Code);
+
+        // Success - clears bio when bio is empty string
+        var cleared = await service.UpdateAsync(user.Id, new UpdatePublicProfileRequest
+        {
+            DisplayName = "Valid Name",
+            Bio = ""
+        });
+        Assert.Equal("Valid Name", cleared.DisplayName);
+        Assert.Equal("", cleared.Bio);
 
         // Success - trims DisplayName and saves Bio
         var updated = await service.UpdateAsync(user.Id, new UpdatePublicProfileRequest
