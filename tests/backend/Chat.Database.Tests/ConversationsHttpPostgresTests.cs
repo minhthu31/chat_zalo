@@ -19,6 +19,12 @@ public partial class ConversationsHttpPostgresTests
 {
     private sealed class Factory : WebApplicationFactory<ConversationsController>
     {
+        private readonly string storagePath = Path.Combine(Path.GetTempPath(), "chat24-tests-" + Guid.NewGuid().ToString("N"));
+        protected override void Dispose(bool disposing)
+        {
+            base.Dispose(disposing);
+            if (disposing && Directory.Exists(storagePath)) Directory.Delete(storagePath, recursive: true);
+        }
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             var cs = Environment.GetEnvironmentVariable("CHAT_TEST_CONNECTION_STRING")
@@ -29,7 +35,8 @@ public partial class ConversationsHttpPostgresTests
                 throw new InvalidOperationException("A dedicated test/review database is required.");
             builder.UseEnvironment("Development")
                 .UseSetting("ConnectionStrings:DefaultConnection", cs)
-                .UseSetting("ConnectionStrings:ChatDb", cs);
+                .UseSetting("ConnectionStrings:ChatDb", cs)
+                .UseSetting("FileStorage:RootPath", storagePath);
         }
     }
 
@@ -403,6 +410,19 @@ public async Task Messages_CookieCsrfRetryPaginationAndBlocks_FollowContract()
                 var token = (await Json(await client.GetAsync("/api/auth/csrf"))).GetProperty("token").GetString();
                 request.Headers.Add("X-CSRF-TOKEN", invalidCsrf ? "invalid" : token);
             }
+            return await client.SendAsync(request);
+        }
+        public async Task<HttpResponseMessage> Upload(Guid conversation, byte[] bytes, string filename = "note.txt",
+            string type = "text/plain", bool csrf = true, string field = "file")
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, $"/api/conversations/{conversation}/attachments");
+            request.Headers.ExpectContinue = true;
+            using var form = new MultipartFormDataContent();
+            var part = new ByteArrayContent(bytes);
+            part.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(type);
+            form.Add(part, field, filename); request.Content = form;
+            if (csrf)
+                request.Headers.Add("X-CSRF-TOKEN", (await Json(await client.GetAsync("/api/auth/csrf"))).GetProperty("token").GetString());
             return await client.SendAsync(request);
         }
         public async Task<Guid> Register()
