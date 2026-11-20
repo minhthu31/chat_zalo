@@ -216,6 +216,59 @@ public sealed class FriendshipService(ChatDbContext db) : IFriendshipService
         return rows;
     }
 
+    public async Task<PagedFriendSearchResponse> SearchFriendsAsync(
+        Guid currentUserId, string? keyword, int page, int pageSize)
+    {
+        if (page < 1)
+            throw new ArgumentOutOfRangeException(nameof(page));
+        if (pageSize is < 1 or > PagedFriendSearchResponse.MaxPageSize)
+            throw new ArgumentOutOfRangeException(nameof(pageSize));
+
+        var query = db.Friendships.AsNoTracking()
+            .Where(x => x.Status == "Accepted" &&
+                        (x.UserLowId == currentUserId || x.UserHighId == currentUserId))
+            .Join(db.Users.AsNoTracking(),
+                friendship => friendship.UserLowId == currentUserId
+                    ? friendship.UserHighId : friendship.UserLowId,
+                user => user.Id,
+                (_, user) => new SearchFriendDto
+                {
+                    Id = user.Id,
+                    Username = user.UserName ?? string.Empty,
+                    DisplayName = user.DisplayName
+                });
+
+        if (!string.IsNullOrWhiteSpace(keyword))
+        {
+            var pattern = "%" + EscapeLikePattern(keyword.Trim()) + "%";
+            query = query.Where(user =>
+                EF.Functions.ILike(user.Username, pattern, "\\") ||
+                EF.Functions.ILike(user.DisplayName, pattern, "\\"));
+        }
+
+        var totalCount = await query.CountAsync();
+        var items = await query
+            .OrderBy(user => user.Username)
+            .ThenBy(user => user.Id)
+            .Skip((int)Math.Min((long)(page - 1) * pageSize, int.MaxValue))
+            .Take(pageSize)
+            .ToListAsync();
+
+        return new PagedFriendSearchResponse
+        {
+            Items = items,
+            Page = page,
+            PageSize = pageSize,
+            TotalCount = totalCount,
+            TotalPages = (int)Math.Ceiling(totalCount / (double)pageSize)
+        };
+    }
+
+    private static string EscapeLikePattern(string value) =>
+        value.Replace("\\", "\\\\", StringComparison.Ordinal)
+             .Replace("%", "\\%", StringComparison.Ordinal)
+             .Replace("_", "\\_", StringComparison.Ordinal);
+
     public async Task<FriendshipRequestsDto> GetRequestsAsync(Guid currentUserId)
     {
         var pending = await db.Friendships.AsNoTracking()

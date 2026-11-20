@@ -37,6 +37,38 @@ public sealed class FriendshipsController(IFriendshipService friendships) : Cont
         catch (FriendshipException ex) { return FriendshipError(ex); }
     }
 
+    [HttpGet("search")]
+    public async Task<IActionResult> SearchFriends(
+        [FromQuery] string? keyword,
+        [FromQuery] int? page,
+        [FromQuery] int? pageSize)
+    {
+        if (!TryGetCurrentUserId(out var currentUserId))
+            return Unauthorized(Error("UNAUTHORIZED", "Authentication is required."));
+
+        var pageNumber = page ?? 1;
+        var size = pageSize ?? PagedFriendSearchResponse.DefaultPageSize;
+
+        if (pageNumber < 1)
+            return BadRequest(Error("INVALID_PAGE", "Page must be greater than or equal to 1."));
+        if (size is < 1 or > PagedFriendSearchResponse.MaxPageSize)
+            return BadRequest(Error("INVALID_PAGE_SIZE", $"PageSize must be between 1 and {PagedFriendSearchResponse.MaxPageSize}."));
+
+        try
+        {
+            return Ok(await friendships.SearchFriendsAsync(currentUserId, keyword, pageNumber, size));
+        }
+        catch (ArgumentOutOfRangeException ex) when (ex.ParamName == "page")
+        {
+            return BadRequest(Error("INVALID_PAGE", "Page must be greater than or equal to 1."));
+        }
+        catch (ArgumentOutOfRangeException ex) when (ex.ParamName == "pageSize")
+        {
+            return BadRequest(Error("INVALID_PAGE_SIZE", $"PageSize must be between 1 and {PagedFriendSearchResponse.MaxPageSize}."));
+        }
+        catch (FriendshipException ex) { return FriendshipError(ex); }
+    }
+
     [HttpGet("requests")]
     public async Task<IActionResult> GetRequests()
     {

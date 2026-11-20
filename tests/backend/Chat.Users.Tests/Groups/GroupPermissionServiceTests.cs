@@ -243,7 +243,7 @@ public class GroupPermissionServiceTests
         Assert.False((await _sut.CanDisbandGroupAsync(G, Admin)).Allowed);
     }
 
-        // ---------- Ánh xạ mã lỗi theo API_CONTRACT ----------
+    // ---------- Ánh xạ mã lỗi theo API_CONTRACT ----------
 
     [Fact]
     public async Task ErrorCodes_AndHttpStatus_MatchContract()
@@ -316,6 +316,7 @@ public class GroupPermissionServiceTests
         public Task RejectAsync(Guid currentUserId, Guid requesterUserId) => throw new NotImplementedException();
         public Task RemoveAsync(Guid currentUserId, Guid targetUserId) => throw new NotImplementedException();
         public Task<List<FriendshipDto>> GetFriendsAsync(Guid currentUserId) => throw new NotImplementedException();
+        public Task<PagedFriendSearchResponse> SearchFriendsAsync(Guid currentUserId, string? keyword, int page, int pageSize) => throw new NotImplementedException();
         public Task<FriendshipRequestsDto> GetRequestsAsync(Guid currentUserId) => throw new NotImplementedException();
     }
 }

@@ -49,6 +49,7 @@ public class ConversationServiceTests
         public Task RejectAsync(Guid currentUserId, Guid requesterUserId) => throw new NotImplementedException();
         public Task RemoveAsync(Guid currentUserId, Guid targetUserId) => throw new NotImplementedException();
         public Task<List<FriendshipDto>> GetFriendsAsync(Guid currentUserId) => throw new NotImplementedException();
+        public Task<PagedFriendSearchResponse> SearchFriendsAsync(Guid currentUserId, string? keyword, int page, int pageSize) => throw new NotImplementedException();
         public Task<FriendshipRequestsDto> GetRequestsAsync(Guid currentUserId) => throw new NotImplementedException();
     }
 
@@ -155,6 +156,44 @@ public class ConversationServiceTests
         await using (var ctx = CreateInMemoryDbContext(dbName))
         {
             Assert.Equal(1, await ctx.DirectConversations.CountAsync());
+        }
+    }
+
+    // Existing direct conversations remain accessible after friendship removal
+    // (only block cuts off access to an existing conversation).
+    [Fact]
+    public async Task CreateDirectAsync_WhenExistingConversationAndFriendshipWasRemoved_StillReturnsConversation()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var userA = MakeUser("a");
+        var userB = MakeUser("b");
+
+        await using (var ctx = CreateInMemoryDbContext(dbName))
+        {
+            ctx.Users.AddRange(userA, userB);
+            await ctx.SaveChangesAsync();
+        }
+
+        Guid conversationId;
+        await using (var ctx = CreateInMemoryDbContext(dbName))
+        {
+            var service = new ConversationService(ctx, new MockFriendshipService(), new MockBlockService());
+            var created = await service.CreateDirectAsync(userA.Id, userB.Id);
+            conversationId = created.Id;
+        }
+
+        await using (var ctx = CreateInMemoryDbContext(dbName))
+        {
+            var friendship = new MockFriendshipService
+            {
+                AreFriendsHandler = (_, _) => Task.FromResult(false)
+            };
+            var service = new ConversationService(ctx, friendship, new MockBlockService());
+
+            var result = await service.CreateDirectAsync(userA.Id, userB.Id);
+
+            Assert.Equal(conversationId, result.Id);
+            Assert.False(result.IsNewlyCreated);
         }
     }
 

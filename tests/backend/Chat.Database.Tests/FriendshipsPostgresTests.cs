@@ -109,6 +109,115 @@ public sealed class FriendshipsPostgresTests
     }
 
     [Fact]
+    public async Task SearchFriends_FiltersAcceptedMatchesEscapesWildcardsAndPaginatesDeterministically()
+    {
+        var owner = NewUser("search_owner");
+        var alpha = NewNamedUser("alpha", "Needle One");
+        var bravo = NewNamedUser("bravo", "Second Person");
+        var charlie = NewNamedUser("charlie", "Third Needle");
+        var delta = NewNamedUser("delta", "Fourth Person");
+        var echo = NewNamedUser("echo", "Fifth Person");
+        var underscore = NewNamedUser("has_under_score", "Underscore Person");
+        var percent = NewNamedUser("literal%token", "Percent Person");
+        var pending = NewNamedUser("pending_only", "Needle Pending");
+        var rejected = NewNamedUser("rejected_only", "Needle Rejected");
+        var cancelled = NewNamedUser("cancelled_only", "Needle Cancelled");
+
+        var users = new[]
+        {
+            owner, alpha, bravo, charlie, delta, echo, underscore, percent,
+            pending, rejected, cancelled
+        };
+        var userIds = users.Select(x => x.Id).ToArray();
+
+        await using (var setup = CreateContext())
+        {
+            await setup.Users.AddRangeAsync(users);
+            await setup.SaveChangesAsync();
+        }
+
+        try
+        {
+            await using var db = CreateContext();
+            var service = new FriendshipService(db);
+
+            async Task AcceptAsync(ApplicationUser friend)
+            {
+                await service.SendRequestAsync(owner.Id, friend.Id);
+                await service.AcceptAsync(friend.Id, owner.Id);
+            }
+
+            await AcceptAsync(alpha);
+            await AcceptAsync(bravo);
+            await AcceptAsync(charlie);
+            await AcceptAsync(delta);
+            await AcceptAsync(echo);
+            await AcceptAsync(underscore);
+            await AcceptAsync(percent);
+
+            await service.SendRequestAsync(owner.Id, pending.Id);
+            await service.SendRequestAsync(owner.Id, rejected.Id);
+            await service.RejectAsync(rejected.Id, owner.Id);
+            await service.SendRequestAsync(owner.Id, cancelled.Id);
+            await service.RemoveAsync(owner.Id, cancelled.Id);
+
+            // Username matching is case-insensitive and returns only Accepted friends.
+            var usernameMatch = await service.SearchFriendsAsync(owner.Id, "BRAV", 1, 10);
+            Assert.Equal(1, usernameMatch.TotalCount);
+            Assert.Equal(bravo.Id, Assert.Single(usernameMatch.Items).Id);
+
+            // DisplayName matching is also case-insensitive.
+            var displayNameMatch = await service.SearchFriendsAsync(owner.Id, "nEeDlE", 1, 10);
+            Assert.Equal(2, displayNameMatch.TotalCount);
+            Assert.Equal(
+                new[] { alpha.Id, charlie.Id }.OrderBy(x => x),
+                displayNameMatch.Items.Select(x => x.Id).OrderBy(x => x));
+
+            // Null, empty, and whitespace keywords return the full Accepted friend list.
+            foreach (var keyword in new string?[] { null, "", "   " })
+            {
+                var allFriends = await service.SearchFriendsAsync(owner.Id, keyword, 1, 100);
+                Assert.Equal(7, allFriends.TotalCount);
+                Assert.Equal(7, allFriends.Items.Count);
+                Assert.All(allFriends.Items, item =>
+                    Assert.DoesNotContain(item.Id, new[] { pending.Id, rejected.Id, cancelled.Id }));
+            }
+
+            // Results are ordered by username, then user ID, and page boundaries are stable.
+            var firstPage = await service.SearchFriendsAsync(owner.Id, null, 1, 3);
+            var secondPage = await service.SearchFriendsAsync(owner.Id, null, 2, 3);
+            var thirdPage = await service.SearchFriendsAsync(owner.Id, null, 3, 3);
+            var beyondLastPage = await service.SearchFriendsAsync(owner.Id, null, 4, 3);
+
+            Assert.Equal(7, firstPage.TotalCount);
+            Assert.Equal(3, firstPage.TotalPages);
+            Assert.Equal(new[] { "alpha", "bravo", "charlie" },
+                firstPage.Items.Select(x => x.Username));
+            Assert.Equal(new[] { "delta", "echo", "has_under_score" },
+                secondPage.Items.Select(x => x.Username));
+            Assert.Equal(new[] { "literal%token" },
+                thirdPage.Items.Select(x => x.Username));
+            Assert.Empty(beyondLastPage.Items);
+            Assert.Equal(4, beyondLastPage.Page);
+            Assert.Equal(7, beyondLastPage.TotalCount);
+
+            // PostgreSQL LIKE metacharacters are treated literally, not as wildcards.
+            var underscoreMatch = await service.SearchFriendsAsync(owner.Id, "_", 1, 100);
+            Assert.Equal(new[] { underscore.Id }, underscoreMatch.Items.Select(x => x.Id));
+            var percentMatch = await service.SearchFriendsAsync(owner.Id, "%", 1, 100);
+            Assert.Equal(new[] { percent.Id }, percentMatch.Items.Select(x => x.Id));
+        }
+        finally
+        {
+            await using var cleanup = CreateContext();
+            await cleanup.Friendships
+                .Where(x => userIds.Contains(x.UserLowId) || userIds.Contains(x.UserHighId))
+                .ExecuteDeleteAsync();
+            await cleanup.Users.Where(x => userIds.Contains(x.Id)).ExecuteDeleteAsync();
+        }
+    }
+
+    [Fact]
     public async Task GroupInvitationEligibility_IsCheckedPerInviterAndOnlyForAcceptedPairs()
     {
         var alice = NewUser("alice_group_invite");
@@ -414,6 +523,20 @@ public sealed class FriendshipsPostgresTests
 
             return result;
         }
+    }
+
+    private static ApplicationUser NewNamedUser(string username, string displayName)
+    {
+        var normalizedUsername = username.ToUpperInvariant();
+        return new ApplicationUser
+        {
+            Id = Guid.NewGuid(),
+            UserName = username,
+            NormalizedUserName = normalizedUsername,
+            Email = $"{Guid.NewGuid():N}@example.test",
+            NormalizedEmail = $"{Guid.NewGuid():N}@EXAMPLE.TEST",
+            DisplayName = displayName
+        };
     }
 
     private static ApplicationUser NewUser(string prefix)
