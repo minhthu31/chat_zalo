@@ -61,6 +61,7 @@ public class GroupServiceTests
         public Task RejectAsync(Guid currentUserId, Guid requesterUserId) => throw new NotImplementedException();
         public Task RemoveAsync(Guid currentUserId, Guid targetUserId) => throw new NotImplementedException();
         public Task<List<FriendshipDto>> GetFriendsAsync(Guid currentUserId) => throw new NotImplementedException();
+        public Task<PagedFriendSearchResponse> SearchFriendsAsync(Guid currentUserId, string? keyword, int page, int pageSize) => throw new NotImplementedException();
         public Task<FriendshipRequestsDto> GetRequestsAsync(Guid currentUserId) => throw new NotImplementedException();
     }
 

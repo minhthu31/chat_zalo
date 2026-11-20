@@ -21,5 +21,8 @@ public interface IFriendshipService
     /// <summary>Returns only Accepted friends belonging to the specified user.</summary>
     Task<List<FriendshipDto>> GetFriendsAsync(Guid currentUserId);
     Task<FriendshipRequestsDto> GetRequestsAsync(Guid currentUserId);
-    
+
+    /// <summary>Searches only Accepted friends, optionally by username or display name.</summary>
+    Task<PagedFriendSearchResponse> SearchFriendsAsync(Guid currentUserId, string? keyword, int page, int pageSize);
+
 }
