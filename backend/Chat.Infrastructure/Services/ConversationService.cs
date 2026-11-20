@@ -215,10 +215,7 @@ public class ConversationService : IConversationService
         if (!isActiveMember ||
             await _blockService.HasBlockedAsync(
                 targetUserId,
-                currentUserId) ||
-            !await _friendshipService.AreFriendsAsync(
-                currentUserId,
-                targetUserId))
+                currentUserId))
         {
             throw new UnauthorizedAccessException(
                 "CONVERSATION_ACCESS_DENIED");

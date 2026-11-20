@@ -159,9 +159,10 @@ public class ConversationServiceTests
         }
     }
 
-    // Existing direct conversations still require an Accepted friendship when opened.
+    // Existing direct conversations remain accessible after friendship removal
+    // (only block cuts off access to an existing conversation).
     [Fact]
-    public async Task CreateDirectAsync_WhenExistingConversationAndFriendshipWasRemoved_DeniesAccess()
+    public async Task CreateDirectAsync_WhenExistingConversationAndFriendshipWasRemoved_StillReturnsConversation()
     {
         var dbName = Guid.NewGuid().ToString();
         var userA = MakeUser("a");
@@ -173,10 +174,12 @@ public class ConversationServiceTests
             await ctx.SaveChangesAsync();
         }
 
+        Guid conversationId;
         await using (var ctx = CreateInMemoryDbContext(dbName))
         {
             var service = new ConversationService(ctx, new MockFriendshipService(), new MockBlockService());
-            await service.CreateDirectAsync(userA.Id, userB.Id);
+            var created = await service.CreateDirectAsync(userA.Id, userB.Id);
+            conversationId = created.Id;
         }
 
         await using (var ctx = CreateInMemoryDbContext(dbName))
@@ -187,10 +190,10 @@ public class ConversationServiceTests
             };
             var service = new ConversationService(ctx, friendship, new MockBlockService());
 
-            var ex = await Assert.ThrowsAsync<UnauthorizedAccessException>(
-                () => service.CreateDirectAsync(userA.Id, userB.Id));
+            var result = await service.CreateDirectAsync(userA.Id, userB.Id);
 
-            Assert.Equal("CONVERSATION_ACCESS_DENIED", ex.Message);
+            Assert.Equal(conversationId, result.Id);
+            Assert.False(result.IsNewlyCreated);
         }
     }
 
