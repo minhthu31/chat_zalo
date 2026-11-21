@@ -299,6 +299,106 @@ public sealed class MessageReceiptServiceTests
     }
 
     [Fact]
+    public async Task SequenceZero_ReturnsCurrentCursorsWithoutUpdatingOrPublishing()
+    {
+        var fixture = await SeedDirectAsync();
+        try
+        {
+            await SeedMessagesAsync(
+                fixture.ConversationId,
+                (fixture.FirstUserId, 1),
+                (fixture.SecondUserId, 2));
+
+            var publisher = new CommitCheckingPublisher();
+            await using var db = CreateContext();
+            var service = CreateService(db, publisher);
+
+            var initial = await service.MarkReadAsync(
+                fixture.SecondUserId,
+                fixture.ConversationId,
+                new UpdateReceiptRequest { Seq = 2 });
+
+            Assert.Equal(2L, initial.DeliveredSeq);
+            Assert.Equal(2L, initial.ReadSeq);
+            Assert.Single(publisher.Events);
+
+            var deliveredNoOp = await service.MarkDeliveredAsync(
+                fixture.SecondUserId,
+                fixture.ConversationId,
+                new UpdateReceiptRequest { Seq = 0 });
+            var readNoOp = await service.MarkReadAsync(
+                fixture.SecondUserId,
+                fixture.ConversationId,
+                new UpdateReceiptRequest { Seq = 0 });
+
+            Assert.Equal(2L, deliveredNoOp.DeliveredSeq);
+            Assert.Equal(2L, deliveredNoOp.ReadSeq);
+            Assert.Equal(2L, readNoOp.DeliveredSeq);
+            Assert.Equal(2L, readNoOp.ReadSeq);
+            Assert.Single(publisher.Events);
+
+            await using var verify = CreateContext();
+            var member = await verify.ConversationMembers.AsNoTracking()
+                .SingleAsync(m =>
+                    m.ConversationId == fixture.ConversationId &&
+                    m.UserId == fixture.SecondUserId);
+            Assert.Equal(2L, member.LastDeliveredSeq);
+            Assert.Equal(2L, member.LastReadSeq);
+        }
+        finally
+        {
+            await CleanupAsync(fixture);
+        }
+    }
+
+    [Fact]
+    public async Task UpdateReloadsTrackedMemberAfterDatabaseLockBeforeApplyingMaxCursor()
+    {
+        var fixture = await SeedDirectAsync();
+        try
+        {
+            await SeedMessagesAsync(
+                fixture.ConversationId,
+                (fixture.FirstUserId, 1),
+                (fixture.SecondUserId, 2),
+                (fixture.FirstUserId, 3));
+
+            await using var staleContext = CreateContext();
+            var trackedMember = await staleContext.ConversationMembers.SingleAsync(m =>
+                m.ConversationId == fixture.ConversationId &&
+                m.UserId == fixture.SecondUserId);
+            Assert.Equal(0L, trackedMember.LastDeliveredSeq);
+            Assert.Equal(0L, trackedMember.LastReadSeq);
+
+            await using (var advancingContext = CreateContext())
+            {
+                var advanced = await CreateService(advancingContext).MarkReadAsync(
+                    fixture.SecondUserId,
+                    fixture.ConversationId,
+                    new UpdateReceiptRequest { Seq = 3 });
+                Assert.Equal(3L, advanced.DeliveredSeq);
+                Assert.Equal(3L, advanced.ReadSeq);
+            }
+
+            // staleContext still tracks the original zero-valued entity.
+            // The service must reload it after acquiring FOR UPDATE.
+            var result = await CreateService(staleContext).MarkDeliveredAsync(
+                fixture.SecondUserId,
+                fixture.ConversationId,
+                new UpdateReceiptRequest { Seq = 1 });
+
+            Assert.Equal(3L, result.DeliveredSeq);
+            Assert.Equal(3L, result.ReadSeq);
+            Assert.Equal(3L, trackedMember.LastDeliveredSeq);
+            Assert.Equal(3L, trackedMember.LastReadSeq);
+        }
+        finally
+        {
+            await CleanupAsync(fixture);
+        }
+    }
+
+    [Fact]
     public async Task InvalidOrMissingMessageSequence_IsRejected()
     {
         var fixture = await SeedDirectAsync();
@@ -311,6 +411,14 @@ public sealed class MessageReceiptServiceTests
 
             await using var db = CreateContext();
             var service = CreateService(db);
+
+            var negative = await Assert.ThrowsAsync<ReceiptServiceException>(() =>
+                service.MarkDeliveredAsync(
+                    fixture.SecondUserId,
+                    fixture.ConversationId,
+                    new UpdateReceiptRequest { Seq = -1 }));
+            Assert.Equal(400, negative.StatusCode);
+            Assert.Equal("INVALID_RECEIPT_SEQ", negative.Code);
 
             var missing = await Assert.ThrowsAsync<ReceiptServiceException>(() =>
                 service.MarkDeliveredAsync(

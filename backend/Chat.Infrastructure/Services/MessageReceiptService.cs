@@ -113,7 +113,7 @@ public sealed class MessageReceiptService : IMessageReceiptService
     {
         ValidateIds(currentUserId, conversationId);
 
-        if (request is null || request.Seq <= 0)
+        if (request is null || request.Seq < 0)
             throw InvalidSequence();
 
         await using var transaction = await _db.Database.BeginTransactionAsync(
@@ -151,7 +151,29 @@ public sealed class MessageReceiptService : IMessageReceiptService
         var member = memberRows.SingleOrDefault()
             ?? throw AccessDenied();
 
+        // Raw SQL locking queries may return an already tracked entity without
+        // refreshing its values. Reload both locked rows so this context uses
+        // the latest committed cursors while the transaction still holds locks.
+        await _db.Entry(conversation).ReloadAsync(cancellationToken);
+        await _db.Entry(member).ReloadAsync(cancellationToken);
+
         await EnsureCanViewAsync(currentUserId, conversation, cancellationToken);
+
+        // Seq zero is a synchronization/no-op request. Authorization is still
+        // required, but it must not inspect a message, mutate cursors, or emit
+        // a receipt event.
+        if (request.Seq == 0)
+        {
+            var current = new ReceiptDto
+            {
+                UserId = currentUserId,
+                DeliveredSeq = member.LastDeliveredSeq,
+                ReadSeq = member.LastReadSeq
+            };
+
+            await transaction.CommitAsync(cancellationToken);
+            return current;
+        }
 
         if (request.Seq > conversation.LastMessageSeq ||
             request.Seq < Math.Max(1L, member.JoinedSeq))

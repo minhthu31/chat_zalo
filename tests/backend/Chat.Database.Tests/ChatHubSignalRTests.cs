@@ -164,6 +164,10 @@ public sealed partial class ChatHubSignalRTests
             await _db.Conversations
                 .Where(conversation => ConversationIds.Contains(conversation.Id))
                 .ExecuteDeleteAsync();
+            await _db.UserBlocks
+                .Where(block => UserIds.Contains(block.BlockerUserId) ||
+                                UserIds.Contains(block.BlockedUserId))
+                .ExecuteDeleteAsync();
             await _db.Users
                 .Where(user => UserIds.Contains(user.Id))
                 .ExecuteDeleteAsync();
