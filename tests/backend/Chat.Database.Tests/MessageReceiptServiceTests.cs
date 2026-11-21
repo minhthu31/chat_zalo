@@ -245,7 +245,6 @@ public sealed class MessageReceiptServiceTests
         {
             await SeedMessagesAsync(
                 fixture.ConversationId,
-                (fixture.FirstUserId, 1),
                 (fixture.SecondUserId, 2),
                 (fixture.FirstUserId, 3));
 

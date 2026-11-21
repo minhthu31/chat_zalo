@@ -23,7 +23,7 @@ public sealed class StoredFileConfiguration : IEntityTypeConfiguration<StoredFil
                 ("UsageType" = 'Attachment' AND "ConversationId" IS NOT NULL
                     AND "Status" IN ('Pending', 'Attached')
                     AND "SizeBytes" <= 10485760)
-                """);
+                """.ReplaceLineEndings("\n"));
         });
 
         builder.HasKey(file => file.Id);

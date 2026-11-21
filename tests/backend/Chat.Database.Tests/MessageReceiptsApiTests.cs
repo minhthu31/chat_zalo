@@ -230,6 +230,8 @@ public sealed class MessageReceiptsApiTests
         Assert.Equal(ConversationId, fake.Conversation);
     }
     [Theory]
+    [InlineData("")]
+    [InlineData("null")]
     [InlineData("{}")]
     [InlineData("{\"seq\":null}")]
     [InlineData("{\"seq\":\"1\"}")]

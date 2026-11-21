@@ -78,8 +78,11 @@ public sealed class MessageReceiptService : IMessageReceiptService
         var messageReceipts = new List<MessageReceiptItemDto>();
         if (conversation.Kind == "Group")
         {
+            var joinedSeq = await members.Where(m => m.UserId == currentUserId)
+                .Select(m => (long?)m.JoinedSeq)
+                .SingleOrDefaultAsync(cancellationToken) ?? throw AccessDenied();
             var visibleMessages = await _db.Messages.AsNoTracking()
-                .Where(m => m.ConversationId == conversationId &&
+                .Where(m => m.ConversationId == conversationId && m.Seq >= joinedSeq &&
                     !_db.UserBlocks.Any(b => b.BlockerUserId == m.SenderUserId && b.BlockedUserId == currentUserId))
                 .Select(m => new { m.Id, m.Seq, m.SenderUserId })
                 .ToListAsync(cancellationToken);
@@ -216,10 +219,8 @@ public sealed class MessageReceiptService : IMessageReceiptService
             return groupResult.Receipt;
         }
 
-        // Seq zero is a synchronization/no-op request. Authorization is still
-        // required, but it must not inspect a message, mutate cursors, or emit
-        // a receipt event.
-        if (request.Seq == 0)
+        var currentCursor = markRead ? member.LastReadSeq : member.LastDeliveredSeq;
+        if (request.Seq <= currentCursor)
         {
             var current = new ReceiptDto
             {
@@ -238,61 +239,10 @@ public sealed class MessageReceiptService : IMessageReceiptService
             throw InvalidSequence();
         }
 
-        var targetMessage = await _db.Messages
-            .AsNoTracking()
-            .Where(m => m.ConversationId == conversationId && m.Seq == request.Seq)
-            .Select(m => new { m.Seq, m.SenderUserId })
-            .SingleOrDefaultAsync(cancellationToken);
-
-        if (targetMessage is null)
+        var targetExists = await _db.Messages.AnyAsync(m =>
+            m.ConversationId == conversationId && m.Seq == request.Seq, cancellationToken);
+        if (!targetExists)
             throw InvalidSequence();
-
-        if (conversation.Kind == "Group")
-        {
-            // The target itself must be visible, even for an idempotent/lower
-            // cursor request. A block must never turn a hidden message into an ack.
-            var targetHidden = await _db.UserBlocks.AnyAsync(b =>
-                b.BlockerUserId == targetMessage.SenderUserId &&
-                b.BlockedUserId == currentUserId,
-                cancellationToken);
-
-            if (targetHidden)
-                throw AccessDenied();
-
-            var previousCursor = markRead
-                ? member.LastReadSeq
-                : member.LastDeliveredSeq;
-
-            if (request.Seq > previousCursor)
-            {
-                var rangeStart = Math.Max(member.JoinedSeq, previousCursor + 1);
-                var expectedCount = request.Seq - rangeStart + 1;
-
-                var actualCount = await _db.Messages.CountAsync(m =>
-                    m.ConversationId == conversationId &&
-                    m.Seq >= rangeStart &&
-                    m.Seq <= request.Seq,
-                    cancellationToken);
-
-                // A cumulative cursor cannot jump over a missing sequence.
-                if (actualCount != expectedCount)
-                    throw InvalidSequence();
-
-                var hiddenInRange = await _db.Messages.AnyAsync(m =>
-                    m.ConversationId == conversationId &&
-                    m.Seq >= rangeStart &&
-                    m.Seq <= request.Seq &&
-                    _db.UserBlocks.Any(b =>
-                        b.BlockerUserId == m.SenderUserId &&
-                        b.BlockedUserId == currentUserId),
-                    cancellationToken);
-
-                // Advancing beyond a hidden message would implicitly mark it
-                // delivered/read, so reject the whole advancement.
-                if (hiddenInRange)
-                    throw AccessDenied();
-            }
-        }
 
         var oldDelivered = member.LastDeliveredSeq;
         var oldRead = member.LastReadSeq;
@@ -393,8 +343,6 @@ public sealed class MessageReceiptService : IMessageReceiptService
         }
         if (changed)
             await _db.SaveChangesAsync(cancellationToken);
-        else if (_db.Entry(receipt).State == EntityState.Added)
-            _db.Entry(receipt).State = EntityState.Detached;
 
         return (new ReceiptDto
         {

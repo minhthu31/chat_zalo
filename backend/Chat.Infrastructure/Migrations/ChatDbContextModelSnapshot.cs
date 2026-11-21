@@ -323,6 +323,30 @@ namespace Chat.Infrastructure.Migrations
                     b.ToTable("MessageAttachments", (string)null);
                 });
 
+            modelBuilder.Entity("Chat.Domain.Entities.MessageUserReceipt", b =>
+                {
+                    b.Property<Guid>("MessageId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("DeliveredAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("ReadAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("MessageId", "UserId");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("MessageUserReceipts", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_MessageUserReceipts_ReadRequiresDelivered", "\"ReadAt\" IS NULL OR \"DeliveredAt\" IS NOT NULL");
+                        });
+                });
+
             modelBuilder.Entity("Chat.Domain.Entities.StoredFile", b =>
                 {
                     b.Property<Guid>("Id")
@@ -777,6 +801,21 @@ namespace Chat.Infrastructure.Migrations
                     b.Navigation("Message");
 
                     b.Navigation("StoredFile");
+                });
+
+            modelBuilder.Entity("Chat.Domain.Entities.MessageUserReceipt", b =>
+                {
+                    b.HasOne("Chat.Domain.Entities.Message", null)
+                        .WithMany()
+                        .HasForeignKey("MessageId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Chat.Infrastructure.Identity.ApplicationUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Chat.Domain.Entities.StoredFile", b =>

@@ -6,6 +6,7 @@ using Chat.Application.Interfaces;
 using Chat.Application.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 
 namespace Chat.Api.Controllers;
 
@@ -44,7 +45,7 @@ public sealed class MessageReceiptsController : ControllerBase
     [ValidateAntiforgeryJson]
     public async Task<IActionResult> MarkDelivered(
         [FromRoute] Guid id,
-        [FromBody] JsonElement request,
+        [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] JsonElement request,
         CancellationToken cancellationToken)
     {
         if (!TryGetCurrentUserId(out var userId))
@@ -69,7 +70,7 @@ public sealed class MessageReceiptsController : ControllerBase
     [ValidateAntiforgeryJson]
     public async Task<IActionResult> MarkRead(
         [FromRoute] Guid id,
-        [FromBody] JsonElement request,
+        [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] JsonElement request,
         CancellationToken cancellationToken)
     {
         if (!TryGetCurrentUserId(out var userId))

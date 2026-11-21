@@ -815,13 +815,12 @@ Quy định:
 
 Chi tiết CHAT-28:
 
-- GET/PUT yêu cầu quyền hội thoại hiện tại. GET trả mốc của các thành viên đang hoạt động; user đã rời/bị xóa không tiếp tục nhận event. Không thêm Email hoặc thông tin Identity vào response.
-- PUT chỉ cập nhật mốc của user đăng nhập, không nhận userId tùy ý từ body. Thiếu/null/sai kiểu/âm/vượt LastMessageSeq dùng `400 INVALID_RECEIPT_SEQ`.
-- Seq bằng 0 hoặc thấp hơn/bằng mốc đã lưu là no-op, trả mốc hiện tại sau khi kiểm tra quyền. Mốc dương mới phải trỏ đến tin thực sự tồn tại và người gọi được xem, bao gồm JoinedSeq/Blocks; không dùng riêng LastMessageSeq để chứng minh quyền.
-- Mốc cập nhật đồng thời dùng giá trị lớn nhất; MarkRead nâng delivered nếu cần trong cùng transaction. Event chỉ phát khi mốc thay đổi và commit thành công; retry không bắt buộc phát lại event.
-- Tên người đã xem một tin chỉ lấy trong các thành viên khác người gửi, còn quyền xem tin đó, kết hợp mốc và quy tắc Blocks. Không phát toàn bộ mốc receipts cho connection chưa Join hoặc đã mất quyền.
-
-**Điểm chưa chốt trước khi triển khai CHAT-28:** hai mốc tổng không lưu được lịch sử từng tin bị Blocks ẩn. Ví dụ Seq 10 bị ẩn nhưng Seq 11 đã xem; sau khi bỏ chặn, chỉ `readSeq=11` không chứng minh đã xem Seq 10. Không được tự coi tin vừa hiện lại là đã xem. Leader và người phụ trách receipts cần chốt cách lưu/diễn giải trạng thái này; nếu cần đổi schema phải qua owner Database bằng migration mới. Các endpoint/DTO phía trên giữ nguyên trong khi chốt giải pháp.
+- GET/PUT yêu cầu quyền hội thoại hiện tại. GET trả thông tin các thành viên đang hoạt động trong `items`. PUT dùng user đang đăng nhập. Thiếu/null/sai kiểu/âm/vượt `LastMessageSeq` dùng `400 INVALID_RECEIPT_SEQ`.
+- Chat cá nhân dùng `deliveredSeq` và `readSeq` trong `items` và response PUT. Sau khi kiểm tra quyền, `seq` bằng hoặc thấp hơn mốc tương ứng trả mốc hiện tại. Khi nâng mốc, tin đích phải tồn tại và thỏa `JoinedSeq`.
+- Chat nhóm dùng cùng hai endpoint PUT nhưng `seq` dương xác nhận đúng một tin. Response bổ sung `messageId`, `seq`, `isDelivered` và `isRead`. GET bổ sung `messages` gồm `messageId`, `seq`, `senderUserId`, `deliveredByUserIds` và `readByUserIds`. FE tra tên từ `items` và dùng các danh sách theo tin để hiển thị receipts nhóm.
+- `seq=0` trả mốc hiện tại sau khi kiểm tra quyền, không cập nhật hoặc phát event. Với nhóm, GET cung cấp trạng thái theo tin. Xác nhận Đã xem cũng ghi Đã nhận. Gửi lại xác nhận đã lưu và còn quyền xem trả kết quả hiện tại, không ghi lại hoặc phát event.
+- Nhóm áp dụng `JoinedSeq` và Blocks cho từng tin. Khi A chặn B, B vẫn xác nhận được tin của C. Xác nhận tin của A đang bị ẩn trả `403 CONVERSATION_ACCESS_DENIED`. Sau khi bỏ chặn, FE gửi Đã nhận khi tải được tin và Đã xem khi tin xuất hiện trong vùng nhìn thấy. BE lưu từng xác nhận riêng, kể cả với tin cũ hơn tin C.
+- Event chỉ phát sau commit và khi trạng thái đổi, tới các connection đã Join và còn quyền xem. Nhóm kiểm tra quyền xem tin đích cho từng người nhận event.
 
 ### 6. SignalR
 
@@ -846,7 +845,8 @@ Bổ sung event `MessageReceiptChanged`:
 }
 ```
 
-- Kiểm tra subscription, quyền nhóm và Blocks trước khi phát.
+- Với chat nhóm, event bổ sung `messageId`, `seq`, `isDelivered` và `isRead`. FE áp dụng thay đổi theo cặp tin nhắn và người xác nhận.
+- Kiểm tra subscription, quyền nhóm, `JoinedSeq` và Blocks trước khi phát.
 - Chỉ phát sau commit.
 - FE bỏ qua mốc cũ, ghép tên từ API receipts.
 - Reconnect: Join lại → đồng bộ Messages bằng `afterSeq` → tải lại receipts và thiết lập thông báo.

@@ -81,48 +81,34 @@ namespace chat_zalo.Services
             if (kind is null)
                 return;
 
-            var activeMemberIds = await _dbContext.ConversationMembers
-                .AsNoTracking()
-                .Where(m => m.ConversationId == receipt.ConversationId && m.LeftAt == null)
-                .Select(m => m.UserId)
-                .ToListAsync(cancellationToken);
+            var activeMembers = _dbContext.ConversationMembers.AsNoTracking()
+                .Where(m => m.ConversationId == receipt.ConversationId && m.LeftAt == null);
 
-            // Do not publish an event for a user whose membership was revoked
-            // after the receipt transaction completed.
-            if (!activeMemberIds.Contains(receipt.UserId))
+            if (!await activeMembers.AnyAsync(m => m.UserId == receipt.UserId, cancellationToken))
                 return;
 
+            if (kind == "Group")
+            {
+                if (receipt.MessageId is not Guid messageId)
+                    return;
+
+                activeMembers = activeMembers.Where(member => _dbContext.Messages.Any(message =>
+                    message.Id == messageId && message.ConversationId == receipt.ConversationId &&
+                    message.Seq >= member.JoinedSeq &&
+                    !_dbContext.UserBlocks.Any(block => block.BlockerUserId == message.SenderUserId &&
+                        block.BlockedUserId == member.UserId)));
+            }
+
+            var activeMemberIds = await activeMembers.Select(m => m.UserId).ToListAsync(cancellationToken);
             var recipients = new List<Guid>();
             foreach (var recipientId in activeMemberIds)
             {
                 if (kind == "Group")
                 {
                     var permission = await _groupPermissions.CanReceiveRealtimeAsync(
-                        receipt.ConversationId,
-                        recipientId,
-                        cancellationToken);
-
+                        receipt.ConversationId, recipientId, cancellationToken);
                     if (!permission.Allowed)
                         continue;
-
-                    // Per-message group events are visible only where the target message
-                    // itself is visible to this recipient; never use the receipt actor
-                    // as a proxy for the sender.
-                    if (receipt.MessageId is Guid messageId)
-                    {
-                        var hiddenMessage = await _dbContext.Messages.AsNoTracking()
-                            .Where(m => m.Id == messageId && m.ConversationId == receipt.ConversationId)
-                            .AnyAsync(m => _dbContext.UserBlocks.Any(b =>
-                                b.BlockerUserId == m.SenderUserId &&
-                                b.BlockedUserId == recipientId), cancellationToken);
-                        if (hiddenMessage)
-                            continue;
-                    }
-                    else
-                    {
-                        // Legacy group cursor events must not reveal hidden messages.
-                        continue;
-                    }
                 }
                 else if (kind == "Direct")
                 {
