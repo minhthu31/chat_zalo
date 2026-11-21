@@ -4,7 +4,10 @@ namespace Chat.Application.Interfaces;
 
 public interface IMessageReceiptService
 {
-    Task<ConversationReceiptsDto> GetAsync(Guid currentUserId, Guid conversationId, CancellationToken cancellationToken = default);
+    const int MaxMessageIds = 100;
+
+    Task<ConversationReceiptsDto> GetAsync(Guid currentUserId, Guid conversationId,
+        CancellationToken cancellationToken = default, IReadOnlyCollection<Guid>? messageIds = null);
     Task<ReceiptDto> MarkDeliveredAsync(
         Guid currentUserId,
         Guid conversationId,
