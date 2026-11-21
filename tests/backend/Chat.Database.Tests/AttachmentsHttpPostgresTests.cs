@@ -195,6 +195,222 @@ public partial class ConversationsHttpPostgresTests
         Assert.Equal(bytes.Length, content.Length);
     }
 
+
+    [Fact]
+    public async Task AttachmentMessages_EnforceOwnershipUsageCsvAndClientMessageIdConflict()
+    {
+        using var factory = new Factory();
+        factory.UseKestrel(options => options.Listen(IPAddress.Loopback, 0));
+
+        using var a = new Session(factory);
+        using var b = new Session(factory);
+        using var c = new Session(factory);
+
+        var aid = await a.Register();
+        var bid = await b.Register();
+        var cid = await c.Register();
+
+        await a.Send(HttpMethod.Post, "/api/friendships", new { targetUserId = bid });
+        await b.Send(HttpMethod.Post, $"/api/friendships/{aid}/accept");
+
+        await a.Send(HttpMethod.Post, "/api/friendships", new { targetUserId = cid });
+        await c.Send(HttpMethod.Post, $"/api/friendships/{aid}/accept");
+
+        var conversation = (await Json(await a.Send(
+            HttpMethod.Post,
+            "/api/conversations/direct",
+            new { targetUserId = bid }))).GetProperty("id").GetGuid();
+
+        var otherConversation = (await Json(await a.Send(
+            HttpMethod.Post,
+            "/api/conversations/direct",
+            new { targetUserId = cid }))).GetProperty("id").GetGuid();
+
+        var bytes = Encoding.UTF8.GetBytes("attachment test");
+
+        var firstFile = (await Json(await a.Upload(conversation, bytes)))
+            .GetProperty("id").GetGuid();
+
+        var secondFile = (await Json(await a.Upload(conversation, bytes)))
+            .GetProperty("id").GetGuid();
+
+        var fileOwnedByB = (await Json(await b.Upload(conversation, bytes)))
+            .GetProperty("id").GetGuid();
+
+        var fileFromOtherConversation = (await Json(await a.Upload(otherConversation, bytes)))
+            .GetProperty("id").GetGuid();
+
+        var firstClientMessageId = Guid.NewGuid();
+
+        var firstMessageResponse = await a.Send(
+            HttpMethod.Post,
+            $"/api/conversations/{conversation}/messages/attachments",
+            new
+            {
+                clientMessageId = firstClientMessageId,
+                body = "First attachment",
+                attachmentIds = new[] { firstFile }
+            });
+
+        Assert.Equal(HttpStatusCode.Created, firstMessageResponse.StatusCode);
+
+        var firstMessageId = (await Json(firstMessageResponse))
+            .GetProperty("message").GetProperty("id").GetGuid();
+
+        var secondMessageResponse = await a.Send(
+            HttpMethod.Post,
+            $"/api/conversations/{conversation}/messages/attachments",
+            new
+            {
+                clientMessageId = Guid.NewGuid(),
+                body = "Second attachment",
+                attachmentIds = new[] { secondFile }
+            });
+
+        Assert.Equal(HttpStatusCode.Created, secondMessageResponse.StatusCode);
+
+        var secondMessageId = (await Json(secondMessageResponse))
+            .GetProperty("message").GetProperty("id").GetGuid();
+
+        var detailsResponse = await a.Send(
+            HttpMethod.Get,
+            $"/api/conversations/{conversation}/messages/attachment-details?messageIds={firstMessageId},{secondMessageId}");
+
+        Assert.Equal(HttpStatusCode.OK, detailsResponse.StatusCode);
+
+        var details = await Json(detailsResponse);
+        Assert.Equal(2, details.GetArrayLength());
+
+        var reusedFileResponse = await a.Send(
+            HttpMethod.Post,
+            $"/api/conversations/{conversation}/messages/attachments",
+            new
+            {
+                clientMessageId = Guid.NewGuid(),
+                body = "Reuse attachment",
+                attachmentIds = new[] { firstFile }
+            });
+
+        await Error(reusedFileResponse, HttpStatusCode.Conflict, "ATTACHMENT_ALREADY_USED");
+        var otherUsersFileResponse = await a.Send(
+            HttpMethod.Post,
+            $"/api/conversations/{conversation}/messages/attachments",
+            new
+            {
+                clientMessageId = Guid.NewGuid(),
+                body = "Wrong owner",
+                attachmentIds = new[] { fileOwnedByB }
+            });
+        await Error(otherUsersFileResponse, HttpStatusCode.Forbidden, "CONVERSATION_ACCESS_DENIED");
+
+        var otherConversationFileResponse = await a.Send(
+            HttpMethod.Post,
+            $"/api/conversations/{conversation}/messages/attachments",
+            new
+            {
+                clientMessageId = Guid.NewGuid(),
+                body = "Wrong conversation",
+                attachmentIds = new[] { fileFromOtherConversation }
+            });
+
+        await Error(otherConversationFileResponse, HttpStatusCode.Forbidden, "CONVERSATION_ACCESS_DENIED");
+
+        var textWithSameClientMessageId = await a.Send(
+            HttpMethod.Post,
+            $"/api/conversations/{conversation}/messages",
+            new
+            {
+                clientMessageId = firstClientMessageId,
+                body = "Text instead of attachment"
+            });
+
+        await Error(textWithSameClientMessageId, HttpStatusCode.Conflict, "CLIENT_MESSAGE_ID_CONFLICT");
+    }
+
+    [Fact]
+    public async Task AttachmentDetails_RejectsEntireRequestWhenOneGroupMessageIsHiddenByBlock()
+    {
+        using var factory = new Factory();
+        factory.UseKestrel(options => options.Listen(IPAddress.Loopback, 0));
+
+        using var a = new Session(factory);
+        using var b = new Session(factory);
+        using var c = new Session(factory);
+
+        var aid = await a.Register();
+        var bid = await b.Register();
+        var cid = await c.Register();
+
+        await a.Send(HttpMethod.Post, "/api/friendships", new { targetUserId = bid });
+        await b.Send(HttpMethod.Post, $"/api/friendships/{aid}/accept");
+
+        await a.Send(HttpMethod.Post, "/api/friendships", new { targetUserId = cid });
+        await c.Send(HttpMethod.Post, $"/api/friendships/{aid}/accept");
+
+        var conversation = (await Json(await a.Send(
+            HttpMethod.Post,
+            "/api/conversations/groups",
+            new
+            {
+                name = "Attachment visibility test",
+                memberIds = new[] { bid, cid }
+            }))).GetProperty("id").GetGuid();
+
+        var bytes = Encoding.UTF8.GetBytes("group attachment test");
+
+        var aFile = (await Json(await a.Upload(conversation, bytes)))
+            .GetProperty("id").GetGuid();
+
+        var bFile = (await Json(await b.Upload(conversation, bytes)))
+            .GetProperty("id").GetGuid();
+
+        var aMessageResponse = await a.Send(
+            HttpMethod.Post,
+            $"/api/conversations/{conversation}/messages/attachments",
+            new
+            {
+                clientMessageId = Guid.NewGuid(),
+                body = "Message from A",
+                attachmentIds = new[] { aFile }
+            });
+
+        Assert.Equal(HttpStatusCode.Created, aMessageResponse.StatusCode);
+
+        var aMessageId = (await Json(aMessageResponse))
+            .GetProperty("message").GetProperty("id").GetGuid();
+
+        var bMessageResponse = await b.Send(
+            HttpMethod.Post,
+            $"/api/conversations/{conversation}/messages/attachments",
+            new
+            {
+                clientMessageId = Guid.NewGuid(),
+                body = "Message from B",
+                attachmentIds = new[] { bFile }
+            });
+
+        Assert.Equal(HttpStatusCode.Created, bMessageResponse.StatusCode);
+
+        var bMessageId = (await Json(bMessageResponse))
+            .GetProperty("message").GetProperty("id").GetGuid();
+
+        Assert.Equal(
+            HttpStatusCode.NoContent,
+            (await a.Send(HttpMethod.Put, $"/api/blocks/{cid}")).StatusCode);
+
+        var visibleOnlyResponse = await c.Send(
+            HttpMethod.Get,
+            $"/api/conversations/{conversation}/messages/attachment-details?messageIds={bMessageId}");
+
+        Assert.Equal(HttpStatusCode.OK, visibleOnlyResponse.StatusCode);
+
+        var mixedResponse = await c.Send(
+            HttpMethod.Get,
+            $"/api/conversations/{conversation}/messages/attachment-details?messageIds={aMessageId},{bMessageId}");
+
+        await Error(mixedResponse, HttpStatusCode.Forbidden, "CONVERSATION_ACCESS_DENIED");
+    }
+
     private sealed class CleanupRaceStorage(IFileStorage inner, Func<Task> beforeFirstDelete) : IFileStorage
     {
         private bool first = true;

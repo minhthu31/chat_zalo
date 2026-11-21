@@ -147,7 +147,7 @@ public sealed class MessagesController : ControllerBase
     [HttpGet("attachment-details")]
     public async Task<IActionResult> GetAttachmentDetails(
         [FromRoute] Guid id,
-        [FromQuery] List<Guid>? messageIds,
+        [FromQuery] string? messageIds,
         CancellationToken cancellationToken)
     {
         if (!TryGetCurrentUserId(out var userId))
@@ -159,7 +159,9 @@ public sealed class MessagesController : ControllerBase
             });
         }
 
-        if (messageIds == null || messageIds.Count == 0 || messageIds.Count > 100)
+        var parsedMessageIds = new List<Guid>();
+
+        if (string.IsNullOrWhiteSpace(messageIds))
         {
             return BadRequest(new
             {
@@ -168,12 +170,37 @@ public sealed class MessagesController : ControllerBase
             });
         }
 
+        var rawMessageIds = messageIds.Split(',', StringSplitOptions.TrimEntries);
+
+        if (rawMessageIds.Length is < 1 or > 100)
+        {
+            return BadRequest(new
+            {
+                code = "INVALID_MESSAGE_IDS",
+                message = "messageIds must contain between 1 and 100 IDs."
+            });
+        }
+
+        foreach (var rawId in rawMessageIds)
+        {
+            if (!Guid.TryParse(rawId, out var parsedId) || parsedId == Guid.Empty)
+            {
+                return BadRequest(new
+                {
+                    code = "INVALID_MESSAGE_IDS",
+                    message = "messageIds contains an invalid ID."
+                });
+            }
+
+            parsedMessageIds.Add(parsedId);
+        }
+
         try
         {
             var details = await _attachmentMessageService.GetDetailsAsync(
                 userId,
                 id,
-                messageIds,
+                parsedMessageIds,
                 cancellationToken);
 
             return Ok(details);

@@ -130,9 +130,23 @@ public sealed class AttachmentMessageService : IAttachmentMessageService
                 throw Error(404, "ATTACHMENT_NOT_FOUND", "Attachment not found.");
 
             if (file.UploadedByUserId != currentUserId ||
-                file.ConversationId != conversationId ||
-                file.UsageType != "Attachment" ||
-                file.Status != "Pending")
+                file.ConversationId != conversationId)
+            {
+                throw AccessDenied();
+            }
+
+            var alreadyAttached = await _db.MessageAttachments
+                .AnyAsync(a => a.StoredFileId == file.Id, cancellationToken);
+
+            if (alreadyAttached)
+            {
+                throw Error(
+                    409,
+                    "ATTACHMENT_ALREADY_USED",
+                    "An attachment is already linked to a message.");
+            }
+
+            if (file.UsageType != "Attachment" || file.Status != "Pending")
             {
                 throw Error(
                     409,
@@ -151,14 +165,7 @@ public sealed class AttachmentMessageService : IAttachmentMessageService
         if (totalBytes > MaxTotalBytes)
             throw Error(400, "TOTAL_FILE_SIZE_EXCEEDED", "Total attachment size must not exceed 50 MiB.");
 
-        var alreadyAttached = await _db.MessageAttachments
-            .AnyAsync(a => request.AttachmentIds.Contains(a.StoredFileId), cancellationToken);
-
-        if (alreadyAttached)
-            throw Error(409, "ATTACHMENT_ALREADY_USED", "An attachment is already linked to a message.");
-
         var now = DateTimeOffset.UtcNow;
-
         conversation.LastMessageSeq++;
         conversation.LastActivityAt = now;
 
@@ -257,6 +264,11 @@ public sealed class AttachmentMessageService : IAttachmentMessageService
         var visibleIds = await visibleMessages
             .Select(m => m.Id)
             .ToListAsync(cancellationToken);
+
+        if (visibleIds.Count != ids.Length)
+        {
+            throw AccessDenied();
+        }
 
         var attachmentRows = await _db.MessageAttachments
             .AsNoTracking()
@@ -401,7 +413,7 @@ public sealed class AttachmentMessageService : IAttachmentMessageService
 
     private static AttachmentServiceException AccessDenied()
     {
-        return Error(403, "ACCESS_DENIED", "You do not have access to this conversation.");
+        return Error(403, "CONVERSATION_ACCESS_DENIED", "You do not have access to this conversation.");
     }
 
     private static AttachmentServiceException Error(
