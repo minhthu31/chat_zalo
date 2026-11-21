@@ -75,9 +75,38 @@ public sealed class MessageReceiptService : IMessageReceiptService
             })
             .ToListAsync(cancellationToken);
 
+        var messageReceipts = new List<MessageReceiptItemDto>();
+        if (conversation.Kind == "Group")
+        {
+            var visibleMessages = await _db.Messages.AsNoTracking()
+                .Where(m => m.ConversationId == conversationId &&
+                    !_db.UserBlocks.Any(b => b.BlockerUserId == m.SenderUserId && b.BlockedUserId == currentUserId))
+                .Select(m => new { m.Id, m.Seq, m.SenderUserId })
+                .ToListAsync(cancellationToken);
+            var messageIds = visibleMessages.Select(m => m.Id).ToList();
+            var recorded = await _db.MessageUserReceipts.AsNoTracking()
+                .Where(r => messageIds.Contains(r.MessageId))
+                .Select(r => new { r.MessageId, r.UserId, r.DeliveredAt, r.ReadAt })
+                .ToListAsync(cancellationToken);
+            var visibleUserIds = rows.Select(r => r.UserId).ToHashSet();
+            messageReceipts = visibleMessages.OrderBy(m => m.Seq).Select(m => new MessageReceiptItemDto
+            {
+                MessageId = m.Id,
+                Seq = m.Seq,
+                SenderUserId = m.SenderUserId,
+                DeliveredByUserIds = recorded.Where(r => r.MessageId == m.Id && r.DeliveredAt != null &&
+                    r.UserId != m.SenderUserId && visibleUserIds.Contains(r.UserId))
+                    .Select(r => r.UserId).ToList(),
+                ReadByUserIds = recorded.Where(r => r.MessageId == m.Id && r.ReadAt != null &&
+                    r.UserId != m.SenderUserId && visibleUserIds.Contains(r.UserId))
+                    .Select(r => r.UserId).ToList()
+            }).ToList();
+        }
+
         return new ConversationReceiptsDto
         {
             ConversationId = conversationId,
+            Messages = messageReceipts,
             Items = rows.Select(row => new ConversationReceiptItemDto
             {
                 UserId = row.UserId,
@@ -158,6 +187,34 @@ public sealed class MessageReceiptService : IMessageReceiptService
         await _db.Entry(member).ReloadAsync(cancellationToken);
 
         await EnsureCanViewAsync(currentUserId, conversation, cancellationToken);
+
+        if (conversation.Kind == "Group" && request.Seq > 0)
+        {
+            var groupResult = await UpdateGroupMessageAsync(currentUserId, conversationId,
+                request.Seq, markRead, member, conversation, cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            if (groupResult.Changed)
+            {
+                try
+                {
+                    await _eventPublisher.PublishAsync(new MessageReceiptChangedDto
+                    {
+                        ConversationId = conversationId, UserId = currentUserId,
+                        MessageId = groupResult.Receipt.MessageId,
+                        Seq = groupResult.Receipt.Seq,
+                        IsDelivered = groupResult.Receipt.IsDelivered,
+                        IsRead = groupResult.Receipt.IsRead,
+                        DeliveredSeq = groupResult.Receipt.DeliveredSeq,
+                        ReadSeq = groupResult.Receipt.ReadSeq
+                    }, CancellationToken.None);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to publish message receipt {ConversationId}/{Seq}", conversationId, request.Seq);
+                }
+            }
+            return groupResult.Receipt;
+        }
 
         // Seq zero is a synchronization/no-op request. Authorization is still
         // required, but it must not inspect a message, mutate cursors, or emit
@@ -296,6 +353,55 @@ public sealed class MessageReceiptService : IMessageReceiptService
         }
 
         return result;
+    }
+
+    private async Task<(ReceiptDto Receipt, bool Changed)> UpdateGroupMessageAsync(
+        Guid userId, Guid conversationId, long seq, bool markRead,
+        ConversationMember member, Conversation conversation, CancellationToken cancellationToken)
+    {
+        if (seq > conversation.LastMessageSeq || seq < Math.Max(1L, member.JoinedSeq))
+            throw InvalidSequence();
+        var message = await _db.Messages.AsNoTracking()
+            .Where(m => m.ConversationId == conversationId && m.Seq == seq)
+            .Select(m => new { m.Id, m.SenderUserId })
+            .SingleOrDefaultAsync(cancellationToken);
+        if (message is null)
+            throw InvalidSequence();
+        if (await _db.UserBlocks.AnyAsync(b => b.BlockerUserId == message.SenderUserId &&
+            b.BlockedUserId == userId, cancellationToken))
+            throw AccessDenied();
+
+        // The conversation/member locks held by UpdateAsync serialize concurrent retries.
+        var receipt = await _db.MessageUserReceipts
+            .SingleOrDefaultAsync(r => r.MessageId == message.Id && r.UserId == userId, cancellationToken);
+        var changed = false;
+        if (receipt is null)
+        {
+            receipt = new MessageUserReceipt { MessageId = message.Id, UserId = userId };
+            _db.MessageUserReceipts.Add(receipt);
+        }
+        var now = DateTimeOffset.UtcNow;
+        if (receipt.DeliveredAt is null)
+        {
+            receipt.DeliveredAt = now;
+            changed = true;
+        }
+        if (markRead && receipt.ReadAt is null)
+        {
+            receipt.ReadAt = now;
+            changed = true;
+        }
+        if (changed)
+            await _db.SaveChangesAsync(cancellationToken);
+        else if (_db.Entry(receipt).State == EntityState.Added)
+            _db.Entry(receipt).State = EntityState.Detached;
+
+        return (new ReceiptDto
+        {
+            UserId = userId, MessageId = message.Id, Seq = seq,
+            IsDelivered = receipt.DeliveredAt != null, IsRead = receipt.ReadAt != null,
+            DeliveredSeq = member.LastDeliveredSeq, ReadSeq = member.LastReadSeq
+        }, changed);
     }
 
     private async Task EnsureCanViewAsync(

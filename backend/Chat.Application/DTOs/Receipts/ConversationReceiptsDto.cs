@@ -4,4 +4,5 @@ public sealed class ConversationReceiptsDto
 {
     public Guid ConversationId { get; set; }
     public List<ConversationReceiptItemDto> Items { get; set; } = [];
+    public List<MessageReceiptItemDto> Messages { get; set; } = [];
 }

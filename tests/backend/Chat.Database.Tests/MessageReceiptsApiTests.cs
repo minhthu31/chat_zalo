@@ -229,4 +229,27 @@ public sealed class MessageReceiptsApiTests
         Assert.Equal(CallerId, fake.CurrentUserId);
         Assert.Equal(ConversationId, fake.Conversation);
     }
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("{\"seq\":null}")]
+    [InlineData("{\"seq\":\"1\"}")]
+    [InlineData("{\"seq\":1.5}")]
+    [InlineData("{\"seq\":-1}")]
+    public async Task ReceiptUpdates_InvalidSeq_ReturnsSpecificCode(string payload)
+    {
+        using var factory = Factory(new FakeReceiptService());
+        using var client = factory.CreateClient();
+        Authenticate(factory, client);
+        await AddValidCsrfAsync(client);
+        using var request = new HttpRequestMessage(HttpMethod.Put,
+            $"/api/conversations/{ConversationId}/receipts/read")
+        {
+            Content = new StringContent(payload, System.Text.Encoding.UTF8, "application/json")
+        };
+        using var response = await client.SendAsync(request);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var error = await response.Content.ReadFromJsonAsync<ErrorBody>();
+        Assert.Equal("INVALID_RECEIPT_SEQ", error?.Code);
+    }
+
 }

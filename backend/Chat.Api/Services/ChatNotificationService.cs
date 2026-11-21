@@ -105,17 +105,24 @@ namespace chat_zalo.Services
                     if (!permission.Allowed)
                         continue;
 
-                    // Group history hides the receipt owner's messages from a
-                    // recipient whom the owner has blocked. Do not expose that cursor.
-                    var hiddenByRecipient = await _dbContext.UserBlocks
-                        .AsNoTracking()
-                        .AnyAsync(b =>
-                            b.BlockerUserId == receipt.UserId &&
-                            b.BlockedUserId == recipientId,
-                            cancellationToken);
-
-                    if (hiddenByRecipient)
+                    // Per-message group events are visible only where the target message
+                    // itself is visible to this recipient; never use the receipt actor
+                    // as a proxy for the sender.
+                    if (receipt.MessageId is Guid messageId)
+                    {
+                        var hiddenMessage = await _dbContext.Messages.AsNoTracking()
+                            .Where(m => m.Id == messageId && m.ConversationId == receipt.ConversationId)
+                            .AnyAsync(m => _dbContext.UserBlocks.Any(b =>
+                                b.BlockerUserId == m.SenderUserId &&
+                                b.BlockedUserId == recipientId), cancellationToken);
+                        if (hiddenMessage)
+                            continue;
+                    }
+                    else
+                    {
+                        // Legacy group cursor events must not reveal hidden messages.
                         continue;
+                    }
                 }
                 else if (kind == "Direct")
                 {

@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.Json;
 using Chat.Api.Filters;
 using Chat.Application.DTOs.Receipts;
 using Chat.Application.Interfaces;
@@ -43,16 +44,19 @@ public sealed class MessageReceiptsController : ControllerBase
     [ValidateAntiforgeryJson]
     public async Task<IActionResult> MarkDelivered(
         [FromRoute] Guid id,
-        [FromBody] UpdateReceiptRequest request,
+        [FromBody] JsonElement request,
         CancellationToken cancellationToken)
     {
         if (!TryGetCurrentUserId(out var userId))
             return Unauthorized(Error("UNAUTHORIZED", "Bạn chưa đăng nhập."));
 
+        if (!TryParseReceipt(request, out var parsed))
+            return BadRequest(Error("INVALID_RECEIPT_SEQ", "seq phải là số nguyên không âm."));
+
         try
         {
             var result = await _receipts.MarkDeliveredAsync(
-                userId, id, request, cancellationToken);
+                userId, id, parsed, cancellationToken);
             return Ok(result);
         }
         catch (ReceiptServiceException exception)
@@ -65,22 +69,37 @@ public sealed class MessageReceiptsController : ControllerBase
     [ValidateAntiforgeryJson]
     public async Task<IActionResult> MarkRead(
         [FromRoute] Guid id,
-        [FromBody] UpdateReceiptRequest request,
+        [FromBody] JsonElement request,
         CancellationToken cancellationToken)
     {
         if (!TryGetCurrentUserId(out var userId))
             return Unauthorized(Error("UNAUTHORIZED", "Bạn chưa đăng nhập."));
 
+        if (!TryParseReceipt(request, out var parsed))
+            return BadRequest(Error("INVALID_RECEIPT_SEQ", "seq phải là số nguyên không âm."));
+
         try
         {
             var result = await _receipts.MarkReadAsync(
-                userId, id, request, cancellationToken);
+                userId, id, parsed, cancellationToken);
             return Ok(result);
         }
         catch (ReceiptServiceException exception)
         {
             return ServiceError(exception);
         }
+    }
+
+    private static bool TryParseReceipt(JsonElement json, out UpdateReceiptRequest request)
+    {
+        request = new UpdateReceiptRequest();
+        if (json.ValueKind != JsonValueKind.Object ||
+            !json.TryGetProperty("seq", out var seq) ||
+            seq.ValueKind != JsonValueKind.Number ||
+            !seq.TryGetInt64(out var value) || value < 0)
+            return false;
+        request.Seq = value;
+        return true;
     }
 
     private bool TryGetCurrentUserId(out Guid userId)

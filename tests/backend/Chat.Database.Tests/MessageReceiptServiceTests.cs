@@ -442,46 +442,60 @@ public sealed class MessageReceiptServiceTests
     }
 
     [Fact]
-    public async Task GroupReceipt_CannotAcknowledgeBlockedMessageOrAdvancePastIt()
+    public async Task GroupReceipt_BlockThenUnblock_RequiresExplicitAckForOldMessage()
     {
         var fixture = await SeedGroupAsync();
         try
         {
-            await SeedMessagesAsync(
-                fixture.ConversationId,
-                (fixture.FirstUserId, 1),
-                (fixture.SecondUserId, 2),
-                (fixture.ThirdUserId!.Value, 3));
-
-            // The admin blocks the second member. Messages sent by the admin
-            // are hidden from that member by the existing group-history rule.
+            // A sends 1, C sends 2; B must be able to read C while A blocks B.
+            await SeedMessagesAsync(fixture.ConversationId,
+                (fixture.FirstUserId, 1), (fixture.ThirdUserId!.Value, 2));
             await AddBlockAsync(fixture.FirstUserId, fixture.SecondUserId);
-
             await using var db = CreateContext();
             var service = CreateService(db);
-
-            var hiddenTarget = await Assert.ThrowsAsync<ReceiptServiceException>(() =>
-                service.MarkDeliveredAsync(
-                    fixture.SecondUserId,
-                    fixture.ConversationId,
+            var hidden = await Assert.ThrowsAsync<ReceiptServiceException>(() =>
+                service.MarkReadAsync(fixture.SecondUserId, fixture.ConversationId,
                     new UpdateReceiptRequest { Seq = 1 }));
-            Assert.Equal(403, hiddenTarget.StatusCode);
+            Assert.Equal(403, hidden.StatusCode);
 
-            // Seq 2 is visible, but the cumulative cursor cannot jump across
-            // hidden Seq 1 and thereby implicitly acknowledge it.
-            var jumpAcrossHidden = await Assert.ThrowsAsync<ReceiptServiceException>(() =>
-                service.MarkReadAsync(
-                    fixture.SecondUserId,
-                    fixture.ConversationId,
-                    new UpdateReceiptRequest { Seq = 2 }));
-            Assert.Equal(403, jumpAcrossHidden.StatusCode);
+            var cRead = await service.MarkReadAsync(fixture.SecondUserId, fixture.ConversationId,
+                new UpdateReceiptRequest { Seq = 2 });
+            Assert.True(cRead.IsRead);
+            Assert.Equal(2, cRead.Seq);
+
+            await using (var unblockDb = CreateContext())
+            {
+                await unblockDb.UserBlocks.Where(b =>
+                    b.BlockerUserId == fixture.FirstUserId && b.BlockedUserId == fixture.SecondUserId)
+                    .ExecuteDeleteAsync();
+            }
+            var afterUnblock = await service.GetAsync(fixture.SecondUserId, fixture.ConversationId);
+            var oldA = Assert.Single(afterUnblock.Messages.Where(m => m.Seq == 1));
+            Assert.DoesNotContain(fixture.SecondUserId, oldA.ReadByUserIds);
+            var oldC = Assert.Single(afterUnblock.Messages.Where(m => m.Seq == 2));
+            Assert.Contains(fixture.SecondUserId, oldC.ReadByUserIds);
+
+            var aRead = await service.MarkReadAsync(fixture.SecondUserId, fixture.ConversationId,
+                new UpdateReceiptRequest { Seq = 1 });
+            Assert.True(aRead.IsRead);
+            var afterAck = await service.GetAsync(fixture.SecondUserId, fixture.ConversationId);
+            Assert.Contains(fixture.SecondUserId,
+                Assert.Single(afterAck.Messages.Where(m => m.Seq == 1)).ReadByUserIds);
+
+            var retry = await service.MarkReadAsync(fixture.SecondUserId, fixture.ConversationId,
+                new UpdateReceiptRequest { Seq = 1 });
+            Assert.True(retry.IsRead);
+            await using var verify = CreateContext();
+            var messageId = await verify.Messages.Where(m => m.ConversationId == fixture.ConversationId && m.Seq == 1)
+                .Select(m => m.Id).SingleAsync();
+            Assert.Equal(1, await verify.MessageUserReceipts.CountAsync(r =>
+                r.MessageId == messageId && r.UserId == fixture.SecondUserId));
         }
         finally
         {
             await CleanupAsync(fixture);
         }
     }
-
 
     [Fact]
     public async Task DirectReceipts_AreDeniedWhenPeerHasBlockedCaller()
