@@ -25,14 +25,32 @@ public sealed class MessageReceiptsController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> Get(
         [FromRoute] Guid id,
+        [FromQuery(Name = "messageIds")] string? rawMessageIds,
         CancellationToken cancellationToken)
     {
         if (!TryGetCurrentUserId(out var userId))
             return Unauthorized(Error("UNAUTHORIZED", "Bạn chưa đăng nhập."));
 
+        HashSet<Guid>? messageIds = null;
+        if (rawMessageIds is not null)
+        {
+            var parts = rawMessageIds.Split(',', IMessageReceiptService.MaxMessageIds + 1,
+                StringSplitOptions.TrimEntries);
+            if (parts.Length > IMessageReceiptService.MaxMessageIds)
+                return InvalidMessageIds();
+
+            messageIds = [];
+            foreach (var part in parts)
+            {
+                if (!Guid.TryParse(part, out var messageId) || messageId == Guid.Empty)
+                    return InvalidMessageIds();
+                messageIds.Add(messageId);
+            }
+        }
+
         try
         {
-            var result = await _receipts.GetAsync(userId, id, cancellationToken);
+            var result = await _receipts.GetAsync(userId, id, cancellationToken, messageIds);
             return Ok(result);
         }
         catch (ReceiptServiceException exception)
@@ -90,6 +108,9 @@ public sealed class MessageReceiptsController : ControllerBase
             return ServiceError(exception);
         }
     }
+
+    private BadRequestObjectResult InvalidMessageIds() =>
+        BadRequest(Error("VALIDATION_ERROR", "messageIds phải chứa từ 1 đến 100 ID tin nhắn hợp lệ."));
 
     private static bool TryParseReceipt(JsonElement json, out UpdateReceiptRequest request)
     {

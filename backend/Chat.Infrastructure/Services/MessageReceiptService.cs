@@ -36,9 +36,13 @@ public sealed class MessageReceiptService : IMessageReceiptService
     public async Task<ConversationReceiptsDto> GetAsync(
         Guid currentUserId,
         Guid conversationId,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IReadOnlyCollection<Guid>? messageIds = null)
     {
         ValidateIds(currentUserId, conversationId);
+
+        if (messageIds is { Count: > IMessageReceiptService.MaxMessageIds })
+            throw new ReceiptServiceException(400, "VALIDATION_ERROR", "Too many message IDs.");
 
         var conversation = await _db.Conversations
             .AsNoTracking()
@@ -81,27 +85,34 @@ public sealed class MessageReceiptService : IMessageReceiptService
             var joinedSeq = await members.Where(m => m.UserId == currentUserId)
                 .Select(m => (long?)m.JoinedSeq)
                 .SingleOrDefaultAsync(cancellationToken) ?? throw AccessDenied();
-            var visibleMessages = await _db.Messages.AsNoTracking()
+            var visibleMessages = _db.Messages.AsNoTracking()
                 .Where(m => m.ConversationId == conversationId && m.Seq >= joinedSeq &&
-                    !_db.UserBlocks.Any(b => b.BlockerUserId == m.SenderUserId && b.BlockedUserId == currentUserId))
+                    !_db.UserBlocks.Any(b => b.BlockerUserId == m.SenderUserId && b.BlockedUserId == currentUserId));
+            if (messageIds is not null)
+                visibleMessages = visibleMessages.Where(m => messageIds.Contains(m.Id));
+
+            var selected = await visibleMessages.OrderByDescending(m => m.Seq)
+                .Take(IMessageReceiptService.MaxMessageIds)
                 .Select(m => new { m.Id, m.Seq, m.SenderUserId })
                 .ToListAsync(cancellationToken);
-            var messageIds = visibleMessages.Select(m => m.Id).ToList();
+            var selectedIds = selected.Select(m => m.Id).ToArray();
+            var visibleUserIds = rows.Select(r => r.UserId).ToArray();
             var recorded = await _db.MessageUserReceipts.AsNoTracking()
-                .Where(r => messageIds.Contains(r.MessageId))
+                .Where(r => selectedIds.Contains(r.MessageId) && visibleUserIds.Contains(r.UserId))
                 .Select(r => new { r.MessageId, r.UserId, r.DeliveredAt, r.ReadAt })
                 .ToListAsync(cancellationToken);
-            var visibleUserIds = rows.Select(r => r.UserId).ToHashSet();
-            messageReceipts = visibleMessages.OrderBy(m => m.Seq).Select(m => new MessageReceiptItemDto
+            var receiptsByMessage = recorded.ToLookup(r => r.MessageId);
+            selected.Reverse();
+            messageReceipts = selected.Select(m => new MessageReceiptItemDto
             {
                 MessageId = m.Id,
                 Seq = m.Seq,
                 SenderUserId = m.SenderUserId,
-                DeliveredByUserIds = recorded.Where(r => r.MessageId == m.Id && r.DeliveredAt != null &&
-                    r.UserId != m.SenderUserId && visibleUserIds.Contains(r.UserId))
+                DeliveredByUserIds = receiptsByMessage[m.Id]
+                    .Where(r => r.DeliveredAt != null && r.UserId != m.SenderUserId)
                     .Select(r => r.UserId).ToList(),
-                ReadByUserIds = recorded.Where(r => r.MessageId == m.Id && r.ReadAt != null &&
-                    r.UserId != m.SenderUserId && visibleUserIds.Contains(r.UserId))
+                ReadByUserIds = receiptsByMessage[m.Id]
+                    .Where(r => r.ReadAt != null && r.UserId != m.SenderUserId)
                     .Select(r => r.UserId).ToList()
             }).ToList();
         }

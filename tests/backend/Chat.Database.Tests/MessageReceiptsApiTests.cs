@@ -25,15 +25,18 @@ public sealed class MessageReceiptsApiTests
     {
         public Guid CurrentUserId { get; private set; }
         public Guid Conversation { get; private set; }
+        public IReadOnlyCollection<Guid>? MessageIds { get; private set; }
         public long DeliveredSeq { get; private set; }
         public long ReadSeq { get; private set; }
 
         public Task<ConversationReceiptsDto> GetAsync(
             Guid currentUserId,
             Guid conversationId,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default,
+            IReadOnlyCollection<Guid>? messageIds = null)
         {
             Record(currentUserId, conversationId);
+            MessageIds = messageIds;
             return Task.FromResult(new ConversationReceiptsDto
             {
                 ConversationId = conversationId,
@@ -191,10 +194,12 @@ public sealed class MessageReceiptsApiTests
         Authenticate(factory, client);
         await AddValidCsrfAsync(client);
 
+        var messageId = Guid.NewGuid();
         using (var response = await client.GetAsync(
-            $"/api/conversations/{ConversationId}/receipts"))
+            $"/api/conversations/{ConversationId}/receipts?messageIds={messageId},{messageId}"))
         {
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.Equal(messageId, Assert.Single(fake.MessageIds!));
             var dto = await response.Content.ReadFromJsonAsync<ConversationReceiptsDto>();
             Assert.NotNull(dto);
             Assert.Equal(ConversationId, dto!.ConversationId);

@@ -473,6 +473,9 @@ public sealed class MessageReceiptServiceTests
             Assert.DoesNotContain(fixture.SecondUserId, oldA.ReadByUserIds);
             var oldC = Assert.Single(afterUnblock.Messages.Where(m => m.Seq == 2));
             Assert.Contains(fixture.SecondUserId, oldC.ReadByUserIds);
+            var page = await service.GetAsync(fixture.SecondUserId, fixture.ConversationId,
+                messageIds: [oldC.MessageId]);
+            Assert.Equal(oldC.MessageId, Assert.Single(page.Messages).MessageId);
 
             var aRead = await service.MarkReadAsync(fixture.SecondUserId, fixture.ConversationId,
                 new UpdateReceiptRequest { Seq = 1 });
