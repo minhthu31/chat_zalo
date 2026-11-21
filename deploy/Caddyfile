@@ -1,0 +1,19 @@
+{$CHAT_DOMAIN} {
+    encode gzip zstd
+    handle /api/* {
+        reverse_proxy api:8080
+    }
+    handle /hubs/* {
+        reverse_proxy api:8080
+    }
+    handle /health {
+        reverse_proxy api:8080
+    }
+    handle {
+        root * /srv
+        try_files {path} /index.html
+        header /appsettings.json Cache-Control "no-store"
+        header /index.html Cache-Control "no-cache"
+        file_server
+    }
+}

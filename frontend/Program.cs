@@ -10,6 +10,10 @@ builder.RootComponents.Add<App>("#app");
 builder.RootComponents.Add<HeadOutlet>("head::after");
 
 var apiBaseUrl = builder.Configuration["ApiBaseUrl"];
+// Deployments use '/' so REST and SignalR follow the website's public origin.
+// Local development can continue to use an absolute backend URL.
+if (apiBaseUrl == "/")
+    apiBaseUrl = builder.HostEnvironment.BaseAddress;
 
 if (!Uri.TryCreate(apiBaseUrl, UriKind.Absolute, out var apiUri) ||
     (apiUri.Scheme != Uri.UriSchemeHttp &&
