@@ -1,4 +1,4 @@
-﻿
+
 using System.Data;
 using Chat.Application.DTOs.Attachments;
 using Chat.Application.DTOs.Messages;
@@ -41,22 +41,28 @@ public sealed class AttachmentMessageService : IAttachmentMessageService
         SendAttachmentMessageRequest request,
         CancellationToken cancellationToken = default)
     {
+
         if (currentUserId == Guid.Empty ||
             conversationId == Guid.Empty ||
             request is null ||
             request.ClientMessageId == Guid.Empty ||
             request.Body is null ||
-            request.Body.Length > MaxBodyLength ||
-            request.AttachmentIds is null ||
-            request.AttachmentIds.Count is < 1 or > MaxFiles ||
-            request.AttachmentIds.Any(id => id == Guid.Empty) ||
-            request.AttachmentIds.Distinct().Count() != request.AttachmentIds.Count)
+            request.Body.Length > MaxBodyLength)
         {
             throw Error(400, "VALIDATION_ERROR", "Invalid attachment message request.");
         }
 
-        if (request.Body.Length == 0 && request.AttachmentIds.Count == 0)
-            throw Error(400, "VALIDATION_ERROR", "Message body or attachment is required.");
+        if (request.AttachmentIds is null ||
+            request.AttachmentIds.Count is < 1 or > MaxFiles ||
+            request.AttachmentIds.Any(id => id == Guid.Empty) ||
+            request.AttachmentIds.Distinct().Count() != request.AttachmentIds.Count)
+        {
+            throw Error(
+                400,
+                "INVALID_ATTACHMENT_COUNT",
+                "Provide between 1 and 5 unique attachment IDs.");
+        }
+
 
         await using var transaction = await _db.Database.BeginTransactionAsync(
             IsolationLevel.ReadCommitted, cancellationToken);
@@ -218,6 +224,7 @@ public sealed class AttachmentMessageService : IAttachmentMessageService
         };
     }
 
+
     public async Task<IReadOnlyList<AttachmentMessageDto>> GetDetailsAsync(
         Guid currentUserId,
         Guid conversationId,
@@ -228,29 +235,66 @@ public sealed class AttachmentMessageService : IAttachmentMessageService
             conversationId == Guid.Empty ||
             messageIds is null ||
             messageIds.Count is < 1 or > 100 ||
-            messageIds.Any(id => id == Guid.Empty) ||
-            messageIds.Distinct().Count() != messageIds.Count)
+            messageIds.Any(id => id == Guid.Empty))
         {
-            throw Error(400, "VALIDATION_ERROR", "Provide between 1 and 100 unique message IDs.");
+            throw Error(
+                400,
+                "VALIDATION_ERROR",
+                "Provide between 1 and 100 valid message IDs.");
         }
+
+        // Remove duplicate IDs while preserving their original order.
+        var ids = new List<Guid>();
+        var seenIds = new HashSet<Guid>();
+
+        foreach (var messageId in messageIds)
+        {
+            if (seenIds.Add(messageId))
+            {
+                ids.Add(messageId);
+            }
+        }
+
+        var requestedIds = ids.ToArray();
 
         var conversation = await _db.Conversations
             .AsNoTracking()
-            .SingleOrDefaultAsync(c => c.Id == conversationId, cancellationToken);
+            .SingleOrDefaultAsync(
+                c => c.Id == conversationId,
+                cancellationToken);
 
         if (conversation is null)
+        {
             throw Error(404, "NOT_FOUND", "Conversation not found.");
+        }
 
         var member = await EnsureAccessAsync(
-            currentUserId, conversation, sending: false, cancellationToken);
+            currentUserId,
+            conversation,
+            sending: false,
+            cancellationToken);
 
-        var ids = messageIds.ToArray();
+        // Check whether every requested message exists.
+        var existingIds = await _db.Messages
+            .AsNoTracking()
+            .Where(m => requestedIds.Contains(m.Id))
+            .Select(m => m.Id)
+            .ToListAsync(cancellationToken);
 
+        if (existingIds.Count != requestedIds.Length)
+        {
+            throw Error(
+                404,
+                "NOT_FOUND",
+                "One or more messages were not found.");
+        }
+
+        // Check whether every existing message is visible to the user.
         var visibleMessages = _db.Messages
             .AsNoTracking()
             .Where(m =>
                 m.ConversationId == conversationId &&
-                ids.Contains(m.Id) &&
+                requestedIds.Contains(m.Id) &&
                 m.Seq >= member.JoinedSeq);
 
         if (conversation.Kind == "Group")
@@ -265,7 +309,7 @@ public sealed class AttachmentMessageService : IAttachmentMessageService
             .Select(m => m.Id)
             .ToListAsync(cancellationToken);
 
-        if (visibleIds.Count != ids.Length)
+        if (visibleIds.Count != requestedIds.Length)
         {
             throw AccessDenied();
         }
@@ -282,7 +326,8 @@ public sealed class AttachmentMessageService : IAttachmentMessageService
                 g => g.Key,
                 g => g.Select(a => ToAttachmentDto(a.StoredFile)).ToList());
 
-        return visibleIds.Select(id => new AttachmentMessageDto
+        // Return messages in the original order, after removing duplicates.
+        return requestedIds.Select(id => new AttachmentMessageDto
         {
             MessageId = id,
             Attachments = attachmentsByMessage.TryGetValue(id, out var list)
@@ -290,6 +335,7 @@ public sealed class AttachmentMessageService : IAttachmentMessageService
                 : []
         }).ToList();
     }
+
 
     private async Task<ConversationMember> EnsureAccessAsync(
         Guid userId,
@@ -370,14 +416,15 @@ public sealed class AttachmentMessageService : IAttachmentMessageService
     }
 
     private async Task<List<AttachmentDto>> GetAttachmentDtosAsync(
-        Guid messageId,
-        CancellationToken ct)
+    Guid messageId,
+    CancellationToken ct)
     {
         var files = await _db.MessageAttachments
             .AsNoTracking()
             .Include(a => a.StoredFile)
             .Where(a => a.MessageId == messageId)
             .Select(a => a.StoredFile)
+            .OrderBy(file => file.Id)
             .ToListAsync(ct);
 
         return files.Select(ToAttachmentDto).ToList();

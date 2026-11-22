@@ -281,6 +281,83 @@ public partial class ConversationsHttpPostgresTests
         var details = await Json(detailsResponse);
         Assert.Equal(2, details.GetArrayLength());
 
+        // Duplicate IDs must be removed while preserving first-seen order.
+        var duplicateDetailsResponse = await a.Send(
+            HttpMethod.Get,
+            $"/api/conversations/{conversation}/messages/attachment-details?messageIds={secondMessageId},{firstMessageId},{secondMessageId}");
+
+        Assert.Equal(HttpStatusCode.OK, duplicateDetailsResponse.StatusCode);
+
+        var duplicateDetails = await Json(duplicateDetailsResponse);
+        Assert.Equal(2, duplicateDetails.GetArrayLength());
+        Assert.Equal(
+            secondMessageId,
+            duplicateDetails[0].GetProperty("messageId").GetGuid());
+        Assert.Equal(
+            firstMessageId,
+            duplicateDetails[1].GetProperty("messageId").GetGuid());
+
+        // Missing messageIds.
+        await Error(
+            await a.Send(
+                HttpMethod.Get,
+                $"/api/conversations/{conversation}/messages/attachment-details"),
+            HttpStatusCode.BadRequest,
+            "VALIDATION_ERROR");
+
+        // Empty messageIds.
+        await Error(
+            await a.Send(
+                HttpMethod.Get,
+                $"/api/conversations/{conversation}/messages/attachment-details?messageIds="),
+            HttpStatusCode.BadRequest,
+            "VALIDATION_ERROR");
+
+        // Invalid GUID.
+        await Error(
+            await a.Send(
+                HttpMethod.Get,
+                $"/api/conversations/{conversation}/messages/attachment-details?messageIds=not-a-guid"),
+            HttpStatusCode.BadRequest,
+            "VALIDATION_ERROR");
+
+        // Empty GUID.
+        await Error(
+            await a.Send(
+                HttpMethod.Get,
+                $"/api/conversations/{conversation}/messages/attachment-details?messageIds={Guid.Empty}"),
+            HttpStatusCode.BadRequest,
+            "VALIDATION_ERROR");
+
+        // More than 100 IDs.
+        var tooManyIds = string.Join(
+            ",",
+            Enumerable.Range(0, 101).Select(_ => Guid.NewGuid()));
+
+        await Error(
+            await a.Send(
+                HttpMethod.Get,
+                $"/api/conversations/{conversation}/messages/attachment-details?messageIds={tooManyIds}"),
+            HttpStatusCode.BadRequest,
+            "VALIDATION_ERROR");
+
+        // Nonexistent message.
+        await Error(
+            await a.Send(
+                HttpMethod.Get,
+                $"/api/conversations/{conversation}/messages/attachment-details?messageIds={Guid.NewGuid()}"),
+            HttpStatusCode.NotFound,
+            "NOT_FOUND");
+
+        // Existing message belonging to another conversation.
+        await Error(
+            await a.Send(
+                HttpMethod.Get,
+                $"/api/conversations/{otherConversation}/messages/attachment-details?messageIds={firstMessageId}"),
+            HttpStatusCode.Forbidden,
+            "CONVERSATION_ACCESS_DENIED");
+
+
         var reusedFileResponse = await a.Send(
             HttpMethod.Post,
             $"/api/conversations/{conversation}/messages/attachments",
@@ -409,6 +486,108 @@ public partial class ConversationsHttpPostgresTests
             $"/api/conversations/{conversation}/messages/attachment-details?messageIds={aMessageId},{bMessageId}");
 
         await Error(mixedResponse, HttpStatusCode.Forbidden, "CONVERSATION_ACCESS_DENIED");
+    }
+
+
+    [Fact]
+    public async Task AttachmentMessages_ValidateAttachmentIdsAndPreserveRetryOrder()
+    {
+        using var factory = new Factory();
+        factory.UseKestrel(options => options.Listen(IPAddress.Loopback, 0));
+
+        using var a = new Session(factory);
+        using var b = new Session(factory);
+
+        var aid = await a.Register();
+        var bid = await b.Register();
+
+        await a.Send(HttpMethod.Post, "/api/friendships", new { targetUserId = bid });
+        await b.Send(HttpMethod.Post, $"/api/friendships/{aid}/accept");
+
+        var conversation = (await Json(await a.Send(
+            HttpMethod.Post,
+            "/api/conversations/direct",
+            new { targetUserId = bid }))).GetProperty("id").GetGuid();
+
+        var bytes = Encoding.UTF8.GetBytes("attachment validation test");
+
+        var firstFile = (await Json(await a.Upload(conversation, bytes)))
+            .GetProperty("id").GetGuid();
+
+        var secondFile = (await Json(await a.Upload(conversation, bytes)))
+            .GetProperty("id").GetGuid();
+
+        var clientMessageId = Guid.NewGuid();
+
+        await Error(
+            await a.Send(HttpMethod.Post,
+                $"/api/conversations/{conversation}/messages/attachments",
+                new { clientMessageId, body = "Missing IDs" }),
+            HttpStatusCode.BadRequest,
+            "INVALID_ATTACHMENT_COUNT");
+
+        await Error(
+            await a.Send(HttpMethod.Post,
+                $"/api/conversations/{conversation}/messages/attachments",
+                new { clientMessageId = Guid.NewGuid(), body = "Empty IDs", attachmentIds = Array.Empty<Guid>() }),
+            HttpStatusCode.BadRequest,
+            "INVALID_ATTACHMENT_COUNT");
+
+        await Error(
+            await a.Send(HttpMethod.Post,
+                $"/api/conversations/{conversation}/messages/attachments",
+                new { clientMessageId = Guid.NewGuid(), body = "Duplicate IDs", attachmentIds = new[] { firstFile, firstFile } }),
+            HttpStatusCode.BadRequest,
+            "INVALID_ATTACHMENT_COUNT");
+
+        await Error(
+            await a.Send(HttpMethod.Post,
+                $"/api/conversations/{conversation}/messages/attachments",
+                new
+                {
+                    clientMessageId = Guid.NewGuid(),
+                    body = "Too many IDs",
+                    attachmentIds = Enumerable.Range(0, 6).Select(_ => Guid.NewGuid()).ToArray()
+                }),
+            HttpStatusCode.BadRequest,
+            "INVALID_ATTACHMENT_COUNT");
+
+        var request = new
+        {
+            clientMessageId,
+            body = "Retry order test",
+            attachmentIds = new[] { secondFile, firstFile }
+        };
+
+        var firstResponse = await a.Send(
+            HttpMethod.Post,
+            $"/api/conversations/{conversation}/messages/attachments",
+            request);
+
+        Assert.Equal(HttpStatusCode.Created, firstResponse.StatusCode);
+
+        var firstResult = await Json(firstResponse);
+        var firstOrder = firstResult.GetProperty("attachments")
+            .EnumerateArray()
+            .Select(x => x.GetProperty("id").GetGuid())
+            .ToArray();
+
+        Assert.Equal(firstOrder.OrderBy(id => id), firstOrder);
+
+        var retryResponse = await a.Send(
+            HttpMethod.Post,
+            $"/api/conversations/{conversation}/messages/attachments",
+            request);
+
+        Assert.True(retryResponse.IsSuccessStatusCode);
+
+        var retryResult = await Json(retryResponse);
+        var retryOrder = retryResult.GetProperty("attachments")
+            .EnumerateArray()
+            .Select(x => x.GetProperty("id").GetGuid())
+            .ToArray();
+
+        Assert.Equal(firstOrder, retryOrder);
     }
 
     private sealed class CleanupRaceStorage(IFileStorage inner, Func<Task> beforeFirstDelete) : IFileStorage

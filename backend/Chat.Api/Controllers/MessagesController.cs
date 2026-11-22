@@ -165,7 +165,7 @@ public sealed class MessagesController : ControllerBase
         {
             return BadRequest(new
             {
-                code = "INVALID_MESSAGE_IDS",
+                code = "VALIDATION_ERROR",
                 message = "messageIds must contain between 1 and 100 IDs."
             });
         }
@@ -176,7 +176,7 @@ public sealed class MessagesController : ControllerBase
         {
             return BadRequest(new
             {
-                code = "INVALID_MESSAGE_IDS",
+                code = "VALIDATION_ERROR",
                 message = "messageIds must contain between 1 and 100 IDs."
             });
         }
@@ -187,7 +187,7 @@ public sealed class MessagesController : ControllerBase
             {
                 return BadRequest(new
                 {
-                    code = "INVALID_MESSAGE_IDS",
+                    code = "VALIDATION_ERROR",
                     message = "messageIds contains an invalid ID."
                 });
             }
