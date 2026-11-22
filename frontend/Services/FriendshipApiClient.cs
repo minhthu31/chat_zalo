@@ -30,4 +30,9 @@ public class FriendshipApiClient : IFriendshipApiClient
 
     public Task RemoveAsync(Guid userId) =>
         _api.SendAsync(HttpMethod.Delete, $"api/friendships/{userId}");
+
+    // keyword rỗng thì backend trả danh sách bạn bè; pageSize mặc định 10, tối đa 100
+    public Task<PagedFriendSearchResponse> SearchFriendsAsync(string keyword, int page, int pageSize) =>
+        _api.SendAsync<PagedFriendSearchResponse>(HttpMethod.Get,
+            $"api/friendships/search?keyword={Uri.EscapeDataString(keyword)}&page={page}&pageSize={pageSize}");
 }

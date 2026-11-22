@@ -10,4 +10,5 @@ public interface IFriendshipApiClient
     Task AcceptAsync(Guid userId);                             // POST /api/friendships/{userId}/accept
     Task RejectAsync(Guid userId);                             // POST /api/friendships/{userId}/reject
     Task RemoveAsync(Guid userId);                             // DELETE /api/friendships/{userId}
+    Task<PagedFriendSearchResponse> SearchFriendsAsync(string keyword, int page, int pageSize); // GET /api/friendships/search (chỉ bạn Accepted)
 }

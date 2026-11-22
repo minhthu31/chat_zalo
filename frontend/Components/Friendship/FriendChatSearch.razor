@@ -1,0 +1,153 @@
+@implements IDisposable
+@using global::Chat.Client.Components.Shared
+@using global::Chat.Client.Models
+@using global::Chat.Client.Services
+@inject IFriendshipApiClient FriendshipApi
+
+@* Tìm bạn bè đã kết bạn (Accepted) để mở chat. Tự tìm sau khi ngừng gõ, chia trang 10 người. *@
+<div class="friend-search">
+    <label for="friend-search-input">Tìm bạn bè để nhắn tin</label>
+    <input id="friend-search-input"
+           type="search"
+           maxlength="100"
+           autocomplete="off"
+           placeholder="Tên đăng nhập hoặc tên hiển thị"
+           value="@_keyword"
+           @oninput="OnInputAsync" />
+
+    @if (_error is not null)
+    {
+        <p role="alert" class="alert alert-error">@_error</p>
+        <button type="button" class="btn btn-sm" @onclick="() => LoadAsync(_page)">Thử lại</button>
+    }
+    else if (_loading && _items.Count == 0)
+    {
+        <p class="muted">Đang tìm...</p>
+    }
+    else if (_items.Count == 0)
+    {
+        <p class="muted">
+            @if (_keyword.Trim() == "")
+            {
+                <text>Bạn chưa có bạn bè nào. <a href="/users/search">Tìm và kết bạn</a> để bắt đầu.</text>
+            }
+            else
+            {
+                <text>Không có bạn bè nào khớp với "@_keyword.Trim()".</text>
+            }
+        </p>
+    }
+
+    @if (_items.Count > 0)
+    {
+        @* Hộp kết quả có chiều cao tối đa và tự cuộn: danh sách bạn bè dài không được đẩy danh sách hội thoại xuống dưới *@
+        <div class="friend-results">
+            @foreach (var friend in _items)
+            {
+                <div class="friend-row" @key="friend.Id">
+                    <UserIdentity UserId="friend.Id" DisplayName="@friend.DisplayName" Username="@friend.Username" Size="sm" Link="false" />
+                    <button type="button" class="btn btn-primary btn-sm" disabled="@Disabled" @onclick="() => OnOpen.InvokeAsync(friend.Id)">
+                        Nhắn tin
+                    </button>
+                </div>
+            }
+        </div>
+    }
+
+    @if (_totalPages > 1)
+    {
+        <div class="pager">
+            <button type="button" class="btn btn-sm" disabled="@(_loading || _page <= 1)" @onclick="() => LoadAsync(_page - 1)">Trước</button>
+            <span class="muted">Trang @_page / @_totalPages</span>
+            <button type="button" class="btn btn-sm" disabled="@(_loading || _page >= _totalPages)" @onclick="() => LoadAsync(_page + 1)">Sau</button>
+        </div>
+    }
+</div>
+
+@code {
+    private const int PageSize = 10;
+    private const int DebounceMs = 350;
+
+    // Trang cha nhận mã người bạn được chọn để mở cuộc trò chuyện
+    [Parameter]
+    public EventCallback<Guid> OnOpen { get; set; }
+
+    // Khóa nút khi trang cha đang bận (đang mở hội thoại, đang đồng bộ)
+    [Parameter]
+    public bool Disabled { get; set; }
+
+    private string _keyword = "";
+    private List<SearchFriendDto> _items = new();
+    private int _page = 1;
+    private int _totalPages;
+    private bool _loading;
+    private string? _error;
+
+    private CancellationTokenSource? _debounce;
+    private int _requestId;   // mỗi lần tìm tăng một số; kết quả của lần tìm cũ bị bỏ qua
+
+    protected override Task OnInitializedAsync() => LoadAsync(1);
+
+    // Gõ tới đâu nhớ tới đó, nhưng chỉ gọi backend khi người dùng ngừng gõ một chút
+    private async Task OnInputAsync(ChangeEventArgs e)
+    {
+        _keyword = e.Value?.ToString() ?? "";
+
+        _debounce?.Cancel();
+        _debounce?.Dispose();
+        _debounce = new CancellationTokenSource();
+        var token = _debounce.Token;
+
+        try
+        {
+            await Task.Delay(DebounceMs, token);
+        }
+        catch (TaskCanceledException)
+        {
+            return; // đã có lần gõ mới hơn
+        }
+
+        await LoadAsync(1);
+    }
+
+    private async Task LoadAsync(int page)
+    {
+        var id = ++_requestId;
+        _loading = true;
+        _error = null;
+
+        try
+        {
+            var result = await FriendshipApi.SearchFriendsAsync(_keyword.Trim(), page, PageSize);
+            if (id != _requestId)
+                return;
+
+            _items = result.Items;
+            _page = result.Page;
+            _totalPages = result.TotalPages;
+        }
+        catch (ApiException ex)
+        {
+            if (id != _requestId)
+                return;
+
+            _error = ex.Code switch
+            {
+                "NETWORK_ERROR" => "Không kết nối được máy chủ.",
+                "UNAUTHORIZED" => "Bạn cần đăng nhập.",
+                _ => "Không tìm được bạn bè, vui lòng thử lại."
+            };
+        }
+        finally
+        {
+            if (id == _requestId)
+                _loading = false;
+        }
+    }
+
+    public void Dispose()
+    {
+        _debounce?.Cancel();
+        _debounce?.Dispose();
+    }
+}

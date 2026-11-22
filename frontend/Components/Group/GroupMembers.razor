@@ -1,3 +1,4 @@
+@using global::Chat.Client.Components.Shared
 @using global::Chat.Client.Models
 @using global::Chat.Client.Services
 @inject IGroupApiClient GroupApi
@@ -20,20 +21,12 @@
 @foreach (var member in Members)
 {
     <div class="list-item" @key="member.UserId">
-        <span class="person">
-            <span class="avatar">@AvatarText.From(member.DisplayName)</span>
-
-            <span class="person-text">
-                <span class="person-name">
-                    @member.DisplayName
-                    @if (member.UserId == CurrentUserId)
-                    {
-                        <span class="badge badge-you">Bạn</span>
-                    }
-                </span>
-                <span class="muted">@@@member.Username</span>
-            </span>
-        </span>
+        <UserIdentity UserId="member.UserId" DisplayName="@member.DisplayName" Username="@member.Username">
+            @if (member.UserId == CurrentUserId)
+            {
+                <span class="badge badge-you">Bạn</span>
+            }
+        </UserIdentity>
 
         <span class="actions">
             <span class="badge @(member.IsAdmin ? "badge-admin" : "badge-member")">

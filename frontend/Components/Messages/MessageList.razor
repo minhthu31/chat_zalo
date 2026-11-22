@@ -1,13 +1,30 @@
 @implements IAsyncDisposable
 @inject IJSRuntime JS
 @using global::Chat.Client.Models
+@using global::Chat.Client.Services
 <ul @ref="_element" class="messages" aria-label="Tin nhắn">
     @if (Items.Count == 0) { <li>Chưa có tin nhắn.</li> }
+    @{
+        // Hôm nay tính theo múi giờ của người dùng; previousDay nhớ ngày của tin liền trước để chèn vạch ngăn ngày
+        var today = DateOnly.FromDateTime(DateTime.Now);
+        DateOnly? previousDay = null;
+    }
     @foreach (var message in Items)
     {
+        var local = LocalTime.ToLocal(message.CreatedAt);
+        var day = DateOnly.FromDateTime(local);
+        @if (previousDay != day)
+        {
+            <li @key="@($"day-{day:yyyyMMdd}")" class="day-sep" role="separator"><span>@LocalTime.DayLabel(day, today)</span></li>
+            previousDay = day;
+        }
         <li @key="message.Id" class="@(message.SenderUserId == CurrentUserId ? "mine" : "")">
             <strong>@SenderLabel(message)</strong>
-            <p>@message.Body</p><small>#@message.Seq · @message.CreatedAt.ToLocalTime().ToString("HH:mm")</small>
+            @* Tin chỉ có tệp có nội dung chữ rỗng: không vẽ đoạn chữ trống *@
+            @if (!string.IsNullOrEmpty(message.Body)) { <p>@message.Body</p> }
+            @if (Attachments is not null && Attachments.TryGetValue(message.Id, out var files)) { <AttachmentList Items="files" /> }
+            @{ var status = StatusFor?.Invoke(message); }
+            <small title="@LocalTime.Full(local)">#@message.Seq · @LocalTime.Time(local)@(status is null ? "" : " · " + status)</small>
         </li>
     }
 </ul>
@@ -55,6 +72,12 @@
 
     [Parameter] public IReadOnlyList<MessageResponse> Items { get; set; } = [];
     [Parameter] public Guid CurrentUserId { get; set; }
+
+    // Chữ trạng thái dưới tin của mình ("Đã gửi", "Đã nhận", "Đã xem", "B, C đã xem"); trả null thì không hiện gì
+    [Parameter] public Func<MessageResponse, string?>? StatusFor { get; set; }
+
+    // Tệp đính kèm theo mã tin (rỗng hoặc thiếu nghĩa là tin chỉ có chữ)
+    [Parameter] public IReadOnlyDictionary<Guid, IReadOnlyList<AttachmentDto>>? Attachments { get; set; }
 
     // Tên người gửi theo mã người dùng (dùng cho chat nhóm, nơi có nhiều người gửi)
     [Parameter] public IReadOnlyDictionary<Guid, string>? SenderNames { get; set; }

@@ -1,0 +1,89 @@
+@page "/users/{UserId:guid}"
+@using global::Chat.Client.Components.Auth
+@using global::Chat.Client.Components.Shared
+@using global::Chat.Client.Models
+@using global::Chat.Client.Services
+@using global::Chat.Client.State
+@inject IProfileApiClient ProfileApi
+@inject AuthState Auth
+
+<PageTitle>@(_profile?.DisplayName ?? "Hồ sơ") · chat_zalo</PageTitle>
+
+<div class="as-root">
+    <div class="page page-narrow">
+        <UserBar />
+
+        <p class="back-link"><a href="/users/search">← Tìm bạn</a></p>
+
+        <div class="card">
+            @if (_loading)
+            {
+                <p class="muted center">Đang tải...</p>
+            }
+            else if (_error is not null)
+            {
+                <p role="alert" class="alert alert-error">@_error</p>
+                <button type="button" class="btn btn-primary btn-block" @onclick="LoadAsync">Thử lại</button>
+            }
+            else if (_profile is not null)
+            {
+                <div class="avatar-box">
+                    <UserAvatar UserId="_profile.Id" DisplayName="@_profile.DisplayName" Size="lg" />
+                </div>
+                <h1 class="page-title">@_profile.DisplayName</h1>
+                <p class="profile-username">@@@_profile.Username</p>
+
+                @if (string.IsNullOrWhiteSpace(_profile.Bio))
+                {
+                    <p class="muted center">Chưa có giới thiệu.</p>
+                }
+                else
+                {
+                    <p class="profile-bio">@_profile.Bio</p>
+                }
+
+                @if (Auth.CurrentUser?.Id == _profile.Id)
+                {
+                    <a class="btn btn-primary btn-block" href="/profile">Chỉnh sửa hồ sơ của bạn</a>
+                }
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter]
+    public Guid UserId { get; set; }
+
+    private ProfileDto? _profile;
+    private bool _loading = true;
+    private string? _error;
+
+    protected override async Task OnParametersSetAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _error = null;
+
+        try
+        {
+            _profile = await ProfileApi.GetAsync(UserId);
+        }
+        catch (ApiException ex)
+        {
+            _profile = null;
+            _error = ex.Code switch
+            {
+                "USER_NOT_FOUND" => "Không tìm thấy người dùng này.",
+                "UNAUTHORIZED" => "Bạn cần đăng nhập để xem hồ sơ.",
+                "NETWORK_ERROR" => "Không kết nối được máy chủ.",
+                _ => "Không tải được hồ sơ, vui lòng thử lại."
+            };
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+}

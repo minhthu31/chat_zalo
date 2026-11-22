@@ -1,0 +1,86 @@
+@implements IDisposable
+@using global::Chat.Client.Services
+@inject NotificationService Notifications
+
+@* Nút bật/tắt thông báo của một hội thoại. Tắt thông báo chỉ tắt âm thanh và banner, tin vẫn về bình thường. *@
+<span class="mute-box">
+    <button type="button"
+            class="btn btn-sm mute-btn @(_muted ? "is-muted" : "")"
+            disabled="@(_loading || _busy)"
+            aria-pressed="@(_muted ? "true" : "false")"
+            title="@(_muted ? "Bấm để bật lại thông báo cho hội thoại này" : "Bấm để tắt thông báo (âm thanh và banner) của hội thoại này")"
+            @onclick="ToggleAsync">
+        @(_busy ? "Đang lưu..." : _muted ? "🔕 Đã tắt thông báo" : "🔔 Thông báo")
+    </button>
+
+    @if (_error is not null)
+    {
+        <small class="muted" role="alert">@_error</small>
+    }
+</span>
+
+@code {
+    [Parameter, EditorRequired]
+    public Guid ConversationId { get; set; }
+
+    private bool _muted;
+    private bool _loading = true;
+    private bool _busy;
+    private string? _error;
+    private Guid _loadedFor;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (ConversationId == _loadedFor)
+            return;
+
+        Notifications.Changed -= OnChanged;
+        _loadedFor = ConversationId;
+        Notifications.Changed += OnChanged;
+
+        _loading = true;
+        _error = null;
+        _muted = await Notifications.IsMutedAsync(ConversationId);
+        _loading = false;
+    }
+
+    private async Task ToggleAsync()
+    {
+        if (_busy)
+            return;
+
+        _busy = true;
+        _error = null;
+
+        try
+        {
+            // Tính giá trị đích MỘT lần: SetMutedAsync phát sự kiện Changed làm chính nút này tự cập nhật,
+            // nếu đảo lại (!_muted) sau đó thì nút sẽ bị đảo hai lần và quay về trạng thái cũ
+            var target = !_muted;
+            await Notifications.SetMutedAsync(ConversationId, target);
+            _muted = target;
+        }
+        catch (ApiException ex)
+        {
+            _error = ex.Code switch
+            {
+                "CONVERSATION_ACCESS_DENIED" or "GROUP_ACCESS_DENIED" => "Bạn không còn quyền trong hội thoại này.",
+                "NETWORK_ERROR" => "Không kết nối được máy chủ.",
+                _ => "Không lưu được cài đặt, vui lòng thử lại."
+            };
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    // Trạng thái đổi từ nơi khác (đọc lại sau khi kết nối lại): cập nhật nút
+    private void OnChanged(Guid id)
+    {
+        if (id == ConversationId)
+            _ = InvokeAsync(async () => { _muted = await Notifications.IsMutedAsync(id); StateHasChanged(); });
+    }
+
+    public void Dispose() => Notifications.Changed -= OnChanged;
+}

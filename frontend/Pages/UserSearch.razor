@@ -1,6 +1,7 @@
 @page "/users/search"
 @using global::Chat.Client.Components.Auth
 @using global::Chat.Client.Components.Friendship
+@using global::Chat.Client.Components.Shared
 @using global::Chat.Client.Models
 @using global::Chat.Client.Services
 @inject IUserApiClient UserApi
@@ -47,18 +48,7 @@
             @foreach (var user in _results)
             {
                 <div class="list-item" @key="user.Id">
-                    <span class="person">
-                        <span class="avatar">
-                            @AvatarText.From(user.DisplayName)
-                        </span>
-
-                        <span class="person-text">
-                            <span class="person-name">
-                                @user.DisplayName
-                            </span>
-                            <span class="muted">@@@user.Username</span>
-                        </span>
-                    </span>
+                    <UserIdentity UserId="user.Id" DisplayName="@user.DisplayName" Username="@user.Username" ShowBio="true" />
 
                     <span class="actions">
                         <BlockActions UserId="user.Id" />
