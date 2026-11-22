@@ -90,6 +90,17 @@ public sealed class MessageService : IMessageService
 
         if (existing is not null)
         {
+            var hasAttachments = await _db.MessageAttachments
+                .AnyAsync(a => a.MessageId == existing.Id);
+
+            if (hasAttachments)
+            {
+                throw new MessageServiceException(
+                    409,
+                    "CLIENT_MESSAGE_ID_CONFLICT",
+                    "clientMessageId đã được sử dụng cho tin nhắn có tệp đính kèm.");
+            }
+
             if (!string.Equals(
                 existing.Body,
                 request.Body,
