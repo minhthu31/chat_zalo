@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Chat.Application.Interfaces;
+using Chat.Application.DTOs.Receipts;
 using chat_zalo.Hubs;
 using Chat.Infrastructure.Data;
 
@@ -10,7 +11,7 @@ namespace chat_zalo.Services
     {
     }
 
-    public class ChatNotificationService : IChatNotificationService
+    public class ChatNotificationService : IChatNotificationService, IReceiptEventPublisher
     {
         private readonly IHubContext<ChatHub> _hubContext;
         private readonly ChatDbContext _dbContext;
@@ -60,6 +61,90 @@ namespace chat_zalo.Services
                     latestSeq = latestSeq
                 });
             }
+        }
+
+        /// <summary>
+        /// Publishes receipt changes only to active, authorized connections that
+        /// explicitly joined this conversation. This does not alter the existing
+        /// ConversationChanged event or its recipient rules.
+        /// </summary>
+        public async Task PublishAsync(
+            MessageReceiptChangedDto receipt,
+            CancellationToken cancellationToken = default)
+        {
+            var kind = await _dbContext.Conversations
+                .AsNoTracking()
+                .Where(c => c.Id == receipt.ConversationId)
+                .Select(c => c.Kind)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (kind is null)
+                return;
+
+            var activeMembers = _dbContext.ConversationMembers.AsNoTracking()
+                .Where(m => m.ConversationId == receipt.ConversationId && m.LeftAt == null);
+
+            if (!await activeMembers.AnyAsync(m => m.UserId == receipt.UserId, cancellationToken))
+                return;
+
+            if (kind == "Group")
+            {
+                if (receipt.MessageId is not Guid messageId)
+                    return;
+
+                activeMembers = activeMembers.Where(member => _dbContext.Messages.Any(message =>
+                    message.Id == messageId && message.ConversationId == receipt.ConversationId &&
+                    message.Seq >= member.JoinedSeq &&
+                    !_dbContext.UserBlocks.Any(block => block.BlockerUserId == message.SenderUserId &&
+                        block.BlockedUserId == member.UserId)));
+            }
+
+            var activeMemberIds = await activeMembers.Select(m => m.UserId).ToListAsync(cancellationToken);
+            var recipients = new List<Guid>();
+            foreach (var recipientId in activeMemberIds)
+            {
+                if (kind == "Group")
+                {
+                    var permission = await _groupPermissions.CanReceiveRealtimeAsync(
+                        receipt.ConversationId, recipientId, cancellationToken);
+                    if (!permission.Allowed)
+                        continue;
+                }
+                else if (kind == "Direct")
+                {
+                    // In direct chat, a recipient cannot view the conversation
+                    // when the receipt owner has blocked that recipient.
+                    var blockedByReceiptOwner = await _dbContext.UserBlocks
+                        .AsNoTracking()
+                        .AnyAsync(b =>
+                            b.BlockerUserId == receipt.UserId &&
+                            b.BlockedUserId == recipientId,
+                            cancellationToken);
+
+                    if (blockedByReceiptOwner)
+                        continue;
+                }
+                else
+                {
+                    continue;
+                }
+
+                recipients.Add(recipientId);
+            }
+
+            if (recipients.Count == 0)
+                return;
+
+            var connectionIds = _tracker.GetActiveConnectionsForConversation(
+                receipt.ConversationId,
+                recipients);
+
+            if (connectionIds.Count == 0)
+                return;
+
+            await _hubContext.Clients
+                .Clients(connectionIds.ToList())
+                .SendAsync("MessageReceiptChanged", receipt, cancellationToken);
         }
 
         // Nhóm: chỉ thành viên đang hoạt động của nhóm chưa giải tán mới nhận event.
