@@ -579,7 +579,7 @@ public partial class ConversationsHttpPostgresTests
             $"/api/conversations/{conversation}/messages/attachments",
             request);
 
-        Assert.True(retryResponse.IsSuccessStatusCode);
+        Assert.Equal(HttpStatusCode.OK, retryResponse.StatusCode);
 
         var retryResult = await Json(retryResponse);
         var retryOrder = retryResult.GetProperty("attachments")
