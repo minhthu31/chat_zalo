@@ -5,7 +5,9 @@
     {
         <button type="button" class="conversation @(item.Id == Selected ? "active" : "")"
                 disabled="@Disabled" @onclick="() => OnSelect.InvokeAsync(item.Id)">
-            @(Titles.TryGetValue(item.Id, out var title) ? title : DefaultTitle(item)) <small>@KindLabel(item)</small>
+            @{ var title = Titles.TryGetValue(item.Id, out var name) && !string.IsNullOrWhiteSpace(name) ? name : DefaultTitle(item); }
+            <span class="avatar avatar-sm" aria-hidden="true">@title[..1].ToUpperInvariant()</span>
+            <span class="conversation-label"><strong>@title</strong><small>@KindLabel(item)</small></span>
         </button>
     }
 </nav>

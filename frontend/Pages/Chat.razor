@@ -25,10 +25,6 @@
 <div class="as-root chat-root">
 <section class="chat-shell">
     @if (!initializing) { <UserBar /> }
-    <header class="chat-heading">
-        <div class="brand-mark">C</div>
-        <div><span class="chat-brand">chat_zalo</span><h1>Tin nhắn</h1><p>Kết nối bạn bè, trò chuyện mọi lúc</p></div>
-    </header>
     @if (initializing) { <p class="alert alert-info" role="status">Đang kiểm tra phiên đăng nhập…</p> }
     else if (!Auth.IsAuthenticated)
     {
@@ -36,7 +32,7 @@
     }
     else if (session is not null)
     {
-        <div class="chat-connection" role="status"><span class="connection-label"><i class="@(connected ? "online" : "")"></i>@connectionStatus</span>
+        <div class="chat-connection" hidden="@(connected && session.State.SelectedId.HasValue)" role="status"><span class="connection-label"><i class="@(connected ? "online" : "")"></i>@connectionStatus</span>
             <button class="btn btn-sm" @onclick="RefreshAsync" disabled="@refreshing">@(refreshing ? "Đang đồng bộ…" : "Kết nối / đồng bộ lại")</button>
         </div>
         <div class="chat-layout direct-layout">
@@ -54,7 +50,25 @@
             <main class="chat-main">
                 @if (session.State.SelectedId is Guid id && session.State.Active is { } active)
                 {
-                    <div class="chat-topbar"><span class="avatar">@ConversationTitle(id)[..1].ToUpperInvariant()</span><div><h2>@ConversationTitle(id)</h2><small class="muted">@(IsGroup(id) ? (membersFor == id ? $"Nhóm · {senderNames.Count} thành viên · " : "Nhóm · ") : "Trò chuyện cá nhân · ")Tin nhắn được lưu trên hệ thống</small></div>@if (IsGroup(id)) { <a class="btn btn-sm" href="/groups/@id">Xem nhóm</a> }<ConversationMuteButton ConversationId="id" /></div>
+                    <div class="chat-topbar">
+                        <span class="avatar">@ConversationTitle(id)[..1].ToUpperInvariant()</span>
+                        <div class="chat-topbar-title">
+                            <h2>@ConversationTitle(id)</h2>
+                            <small class="muted">@(IsGroup(id) ? (membersFor == id ? $"Nhóm · {senderNames.Count} thành viên" : "Nhóm") : "Trò chuyện cá nhân")</small>
+                        </div>
+                        <details class="conversation-menu" @key="id">
+                            <summary aria-label="Tùy chọn hội thoại">•••</summary>
+                            <div class="conversation-menu-popup">
+                                @if (IsGroup(id)) { <a class="btn btn-sm" href="/groups/@id">Xem nhóm</a> }
+                                <ConversationMuteButton ConversationId="id" />
+                                <button class="btn btn-sm" @onclick="RefreshAsync" disabled="@refreshing">Đồng bộ lại</button>
+                                @if (conversationPeers.TryGetValue(id, out var peer))
+                                {
+                                    <ConversationDetails Peer="peer" Revision="detailsRevision" OnChanged="RefreshFriendshipsAsync" CanSendChanged="value => sendPermissions[id] = value" />
+                                }
+                            </div>
+                        </details>
+                    </div>
                     @if (active.Loading) { <p class="chat-loading" role="status">Đang tải tin nhắn…</p> }
                     <button class="btn btn-sm older" @onclick="LoadOlderAsync" disabled="@(!active.HasOlder || active.Loading)">Tải tin nhắn cũ hơn</button>
                     <MessageList Items="active.Messages" CurrentUserId="Auth.CurrentUser!.Id"
@@ -72,10 +86,6 @@
                 }
                 else { <div class="chat-empty"><span class="brand-mark">C</span><h2>Chào mừng đến chat_zalo</h2><p>Chọn một hội thoại hoặc bắt đầu trò chuyện với bạn bè.</p></div> }
             </main>
-            @if (session.State.SelectedId is Guid detailsId && conversationPeers.TryGetValue(detailsId, out var peer))
-            {
-                <ConversationDetails @key="detailsId" Peer="peer" Revision="detailsRevision" OnChanged="RefreshFriendshipsAsync" CanSendChanged="value => sendPermissions[detailsId] = value" />
-            }
         </div>
     }
     @if (error is not null) { <p class="alert alert-error chat-global-error" role="alert">@error</p> }

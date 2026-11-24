@@ -4,22 +4,37 @@
 @using Chat.Client.Components.Shared
 @inject AuthState Auth
 
+@using Chat.Client.Pages
+@inject IFriendshipApiClient Friends
+@inject IJSRuntime JS
+
 <div class="userbar">
-    <nav class="userbar-links">
+    <nav class="userbar-links" aria-label="Điều hướng chính">
         <NavLink href="/chat" ActiveClass="active">Tin nhắn</NavLink>
         <NavLink href="/groups" ActiveClass="active">Nhóm</NavLink>
-        <NavLink href="/blocks" ActiveClass="active">Đã chặn</NavLink>
-        <NavLink href="/profile" ActiveClass="active">Hồ sơ</NavLink>
-        <NavLink href="/users/search" ActiveClass="active">Tìm bạn</NavLink>
-        <NavLink href="/change-password" ActiveClass="active">Đổi mật khẩu</NavLink>
     </nav>
 
     <div class="userbar-user">
-        @if (Auth.CurrentUser is not null)
+        @if (Auth.CurrentUser is { } user)
         {
-            <UserAvatar UserId="Auth.CurrentUser.Id" DisplayName="@Auth.CurrentUser.DisplayName" Size="sm" />
-            <span class="userbar-name">@Auth.CurrentUser.DisplayName</span>
-            <LogoutButton CssClass="btn btn-danger btn-sm" />
+            <NavLink class="userbar-icon" href="/users/search" aria-label="@(incoming > 0 ? $"Bạn bè và lời mời ({incoming} lời mời mới)" : "Bạn bè và lời mời")" title="Bạn bè và lời mời">
+                <span class="nav-person" aria-hidden="true"></span><span class="nav-plus" aria-hidden="true">+</span>
+                @if (incoming > 0) { <span class="userbar-badge">@incoming</span> }
+            </NavLink>
+            <NavLink class="userbar-icon" href="/groups" aria-label="Tạo nhóm" title="Tạo nhóm"><span class="nav-person nav-group" aria-hidden="true"></span></NavLink>
+            <details class="userbar-account" @ref="accountMenu">
+                <summary aria-label="Menu tài khoản">
+                    <UserAvatar UserId="user.Id" DisplayName="@user.DisplayName" Size="sm" />
+                    <span class="userbar-name">@user.DisplayName</span><span aria-hidden="true">⌄</span>
+                </summary>
+                <div class="userbar-dropdown">
+                    <header><strong>@user.DisplayName</strong><small>Đang hoạt động</small></header>
+                    <button type="button" @onclick="() => OpenAsync(AccountPanel.Profile)">Hồ sơ</button>
+                    <button type="button" @onclick="() => OpenAsync(AccountPanel.Blocks)">Chặn</button>
+                    <button type="button" @onclick="() => OpenAsync(AccountPanel.Password)">Đổi mật khẩu</button>
+                    <button type="button" class="account-signout" @onclick="() => OpenAsync(AccountPanel.Logout)">Đăng xuất</button>
+                </div>
+            </details>
         }
         else if (Auth.IsInitialized)
         {
@@ -28,7 +43,61 @@
     </div>
 </div>
 
+<dialog class="account-dialog" @ref="dialog" aria-label="@PanelTitle" @onclose="ClearPanel">
+    <header><h2>@PanelTitle</h2><form method="dialog"><button type="submit" aria-label="Đóng">×</button></form></header>
+    @switch (panel)
+    {
+        case AccountPanel.Profile:
+            <Profile Embedded="true" />
+            break;
+        case AccountPanel.Blocks:
+            <Blocks Embedded="true" />
+            break;
+        case AccountPanel.Password:
+            <ChangePassword Embedded="true" />
+            break;
+        case AccountPanel.Logout:
+            <p>Bạn có chắc muốn đăng xuất khỏi tài khoản <strong>@Auth.CurrentUser?.DisplayName</strong> không?</p>
+            <div class="account-dialog-actions">
+                <form method="dialog"><button type="submit" class="btn btn-sm">Hủy</button></form>
+                <LogoutButton CssClass="btn btn-danger btn-sm" />
+            </div>
+            break;
+    }
+</dialog>
+
 @code {
+    private enum AccountPanel { None, Profile, Blocks, Password, Logout }
+    private AccountPanel panel;
+    private ElementReference accountMenu;
+    private ElementReference dialog;
+    private int incoming;
+
+    private string PanelTitle => panel switch
+    {
+        AccountPanel.Profile => "Hồ sơ cá nhân",
+        AccountPanel.Blocks => "Danh sách chặn",
+        AccountPanel.Password => "Đổi mật khẩu",
+        AccountPanel.Logout => "Đăng xuất",
+        _ => "Tài khoản"
+    };
+
+    private async Task OpenAsync(AccountPanel selected)
+    {
+        panel = selected;
+        await JS.InvokeVoidAsync("chatAccount.open", accountMenu, dialog);
+    }
+
+    private void ClearPanel() => panel = AccountPanel.None;
+
+    public async Task RefreshRequestsAsync()
+    {
+        if (!Auth.IsAuthenticated) { incoming = 0; return; }
+        try { incoming = (await Friends.GetRequestsAsync()).Incoming.Count; }
+        catch (ApiException) { }
+        await InvokeAsync(StateHasChanged);
+    }
+
     protected override async Task OnInitializedAsync()
     {
         // Đăng ký nhận thông báo để thanh tự cập nhật khi đăng nhập/đăng xuất
@@ -46,6 +115,7 @@
                 // Lỗi mạng: thanh hiện link "Đăng nhập", các trang tự báo lỗi riêng
             }
         }
+        await RefreshRequestsAsync();
     }
 
     private void HandleAuthChanged() => InvokeAsync(StateHasChanged);

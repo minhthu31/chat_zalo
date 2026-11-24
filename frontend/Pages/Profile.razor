@@ -10,14 +10,14 @@
 @inject ProfileCache Profiles
 @inject AuthState Auth
 
-<PageTitle>Hồ sơ · chat_zalo</PageTitle>
+@if (!Embedded) { <PageTitle>Hồ sơ · chat_zalo</PageTitle> }
 
 <div class="as-root">
 <div class="page page-narrow">
-    <UserBar />
+    @if (!Embedded) { <UserBar /> }
 
     <div class="card">
-        <h1 class="page-title">Hồ sơ</h1>
+        @if (!Embedded) { <h1 class="page-title">Hồ sơ</h1> }
 
         @if (_loading)
         {
@@ -30,24 +30,22 @@
         }
         else if (_profile is not null)
         {
-            <div class="avatar-box">
-                <UserAvatar UserId="_profile.Id" DisplayName="@_profile.DisplayName" Size="lg" />
+            <div class="profile-identity">
+                <UserAvatar UserId="_profile.Id" DisplayName="@_profile.DisplayName" Size="sm" />
+                <span class="person-text"><strong>@_profile.DisplayName</strong><small>@@@_profile.Username</small></span>
+                <div class="avatar-actions">
+                    <label class="btn btn-sm file-btn @(_avatarBusy ? "disabled" : "")" title="Đổi ảnh đại diện, tối đa 2 MB">
+                        @(_avatarBusy ? "Đang xử lý..." : "Đổi ảnh")
+                        <InputFile aria-label="Đổi ảnh đại diện" OnChange="OnAvatarSelectedAsync"
+                                   accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+                                   disabled="@_avatarBusy" class="file-input-hidden" />
+                    </label>
+                    @if (_profile.AvatarUrl is not null)
+                    {
+                        <button type="button" class="btn btn-danger btn-sm" disabled="@_avatarBusy" @onclick="RemoveAvatarAsync">Xóa ảnh</button>
+                    }
+                </div>
             </div>
-            <p class="profile-username">@@@_profile.Username</p>
-
-            <div class="avatar-actions">
-                <label class="btn btn-sm file-btn @(_avatarBusy ? "disabled" : "")">
-                    @(_avatarBusy ? "Đang xử lý..." : "Đổi ảnh đại diện")
-                    <InputFile OnChange="OnAvatarSelectedAsync" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
-                               disabled="@_avatarBusy" class="file-input-hidden" />
-                </label>
-
-                @if (_profile.AvatarUrl is not null)
-                {
-                    <button type="button" class="btn btn-danger btn-sm" disabled="@_avatarBusy" @onclick="RemoveAvatarAsync">Xóa ảnh</button>
-                }
-            </div>
-            <p class="hint center">Ảnh JPG, PNG hoặc WebP, tối đa 2 MB.</p>
 
             @if (_avatarError is not null)
             {
@@ -69,7 +67,7 @@
 
                 <div class="field">
                     <label for="bio">Giới thiệu (Bio)</label>
-                    <InputTextArea id="bio" rows="4" maxlength="@ProfileLimits.BioMax" placeholder="Vài dòng về bạn..." @bind-Value="_model.Bio" />
+                    <InputTextArea id="bio" rows="2" maxlength="@ProfileLimits.BioMax" placeholder="Vài dòng về bạn..." @bind-Value="_model.Bio" />
                     <ValidationMessage For="() => _model.Bio" />
                     <p class="hint">@(_model.Bio?.Length ?? 0) / @ProfileLimits.BioMax ký tự</p>
                 </div>
@@ -83,7 +81,7 @@
                     <p class="alert alert-success">Đã lưu.</p>
                 }
 
-                <button type="submit" class="btn btn-primary btn-block" disabled="@_saving">@(_saving ? "Đang lưu..." : "Lưu")</button>
+                <button type="submit" class="btn btn-primary btn-block" disabled="@_saving">@(_saving ? "Đang lưu..." : "Lưu hồ sơ")</button>
             </EditForm>
         }
     </div>
@@ -91,6 +89,7 @@
 </div>
 
 @code {
+    [Parameter] public bool Embedded { get; set; }
     private readonly ProfileInput _model = new();
     private ProfileDto? _profile;
 
