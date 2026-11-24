@@ -1,6 +1,7 @@
 @implements IDisposable
 @using Chat.Client.Services
 @using Chat.Client.State
+@using Chat.Client.Components.Shared
 @inject AuthState Auth
 
 <div class="userbar">
@@ -16,7 +17,7 @@
     <div class="userbar-user">
         @if (Auth.CurrentUser is not null)
         {
-            <span class="avatar avatar-sm">@AvatarText.From(Auth.CurrentUser.DisplayName)</span>
+            <UserAvatar UserId="Auth.CurrentUser.Id" DisplayName="@Auth.CurrentUser.DisplayName" Size="sm" />
             <span class="userbar-name">@Auth.CurrentUser.DisplayName</span>
             <LogoutButton CssClass="btn btn-danger btn-sm" />
         }

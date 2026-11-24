@@ -1,3 +1,4 @@
+@using global::Chat.Client.Components.Shared
 @using global::Chat.Client.Models
 @using global::Chat.Client.Services
 @inject IFriendshipApiClient FriendshipApi
@@ -38,14 +39,7 @@ else
     @foreach (var friend in candidates)
     {
         <div class="list-item" @key="friend.UserId">
-            <span class="person">
-                <span class="avatar">@AvatarText.From(friend.DisplayName)</span>
-
-                <span class="person-text">
-                    <span class="person-name">@friend.DisplayName</span>
-                    <span class="muted">@@@friend.Username</span>
-                </span>
-            </span>
+            <UserIdentity UserId="friend.UserId" DisplayName="@friend.DisplayName" Username="@friend.Username" />
 
             <span class="actions">
                 <button type="button"

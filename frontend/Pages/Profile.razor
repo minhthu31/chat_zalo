@@ -2,11 +2,15 @@
 @using System.ComponentModel.DataAnnotations
 @using Microsoft.AspNetCore.Components.Forms
 @using global::Chat.Client.Components.Auth
+@using global::Chat.Client.Components.Shared
 @using global::Chat.Client.Models
 @using global::Chat.Client.Services
 @using global::Chat.Client.State
-@inject IUserApiClient UserApi
+@inject IProfileApiClient ProfileApi
+@inject ProfileCache Profiles
 @inject AuthState Auth
+
+<PageTitle>Hồ sơ · chat_zalo</PageTitle>
 
 <div class="as-root">
 <div class="page page-narrow">
@@ -24,18 +28,50 @@
             <p role="alert" class="alert alert-error">@_loadError</p>
             <button class="btn btn-primary btn-block" @onclick="LoadAsync">Thử lại</button>
         }
-        else
+        else if (_profile is not null)
         {
-            <div class="avatar avatar-lg">@AvatarText.From(_model.DisplayName)</div>
-            <p class="profile-username">@@@_username</p>
+            <div class="avatar-box">
+                <UserAvatar UserId="_profile.Id" DisplayName="@_profile.DisplayName" Size="lg" />
+            </div>
+            <p class="profile-username">@@@_profile.Username</p>
+
+            <div class="avatar-actions">
+                <label class="btn btn-sm file-btn @(_avatarBusy ? "disabled" : "")">
+                    @(_avatarBusy ? "Đang xử lý..." : "Đổi ảnh đại diện")
+                    <InputFile OnChange="OnAvatarSelectedAsync" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+                               disabled="@_avatarBusy" class="file-input-hidden" />
+                </label>
+
+                @if (_profile.AvatarUrl is not null)
+                {
+                    <button type="button" class="btn btn-danger btn-sm" disabled="@_avatarBusy" @onclick="RemoveAvatarAsync">Xóa ảnh</button>
+                }
+            </div>
+            <p class="hint center">Ảnh JPG, PNG hoặc WebP, tối đa 2 MB.</p>
+
+            @if (_avatarError is not null)
+            {
+                <p role="alert" class="alert alert-error">@_avatarError</p>
+            }
+            @if (_avatarNotice is not null)
+            {
+                <p class="alert alert-success">@_avatarNotice</p>
+            }
 
             <EditForm Model="_model" OnValidSubmit="SaveAsync" FormName="profile">
                 <DataAnnotationsValidator />
 
                 <div class="field">
                     <label for="displayName">Tên hiển thị</label>
-                    <InputText id="displayName" @bind-Value="_model.DisplayName" />
+                    <InputText id="displayName" maxlength="@ProfileLimits.DisplayNameMax" @bind-Value="_model.DisplayName" />
                     <ValidationMessage For="() => _model.DisplayName" />
+                </div>
+
+                <div class="field">
+                    <label for="bio">Giới thiệu (Bio)</label>
+                    <InputTextArea id="bio" rows="4" maxlength="@ProfileLimits.BioMax" placeholder="Vài dòng về bạn..." @bind-Value="_model.Bio" />
+                    <ValidationMessage For="() => _model.Bio" />
+                    <p class="hint">@(_model.Bio?.Length ?? 0) / @ProfileLimits.BioMax ký tự</p>
                 </div>
 
                 @if (_saveError is not null)
@@ -56,24 +92,49 @@
 
 @code {
     private readonly ProfileInput _model = new();
-    private string _username = "";
+    private ProfileDto? _profile;
+
     private bool _loading = true;
     private bool _saving;
     private bool _saved;
+    private bool _avatarBusy;
+
     private string? _loadError;
     private string? _saveError;
+    private string? _avatarError;
+    private string? _avatarNotice;
 
-    protected override Task OnInitializedAsync() => LoadAsync();
+    protected override async Task OnInitializedAsync()
+    {
+        // Cần biết "tôi là ai" trước khi hỏi hồ sơ (mở lại trang bằng F5 thì AuthState còn trống)
+        if (!Auth.IsInitialized)
+        {
+            try
+            {
+                await Auth.InitializeAsync();
+            }
+            catch (ApiException)
+            {
+                // Lỗi mạng: LoadAsync bên dưới sẽ báo
+            }
+        }
+
+        await LoadAsync();
+    }
 
     private async Task LoadAsync()
     {
         _loading = true;
         _loadError = null;
+
         try
         {
-            var me = await UserApi.GetProfileAsync();
-            _username = me.Username;
-            _model.DisplayName = me.DisplayName;
+            if (Auth.CurrentUser is null)
+                throw new ApiException(401, "UNAUTHORIZED", "Not logged in");
+
+            _profile = await ProfileApi.GetAsync(Auth.CurrentUser.Id);
+            _model.DisplayName = _profile.DisplayName;
+            _model.Bio = _profile.Bio;
         }
         catch (ApiException ex)
         {
@@ -96,18 +157,31 @@
         _saving = true;
         _saved = false;
         _saveError = null;
+
         try
         {
-            var updated = await UserApi.UpdateProfileAsync(new UpdateProfileRequest { DisplayName = _model.DisplayName.Trim() });
+            // Hợp đồng: PUT cập nhật cả tên và Bio; Bio rỗng nghĩa là xóa Bio
+            var updated = await ProfileApi.UpdateMyAsync(new SaveProfileRequest
+            {
+                DisplayName = _model.DisplayName.Trim(),
+                Bio = (_model.Bio ?? "").Trim()
+            });
+
+            _profile = updated;
             _model.DisplayName = updated.DisplayName;
+            _model.Bio = updated.Bio;
             _saved = true;
+
+            Profiles.Invalidate(updated.Id);
             await RefreshBarAsync();
         }
         catch (ApiException ex)
         {
             _saveError = ex.Code switch
             {
-                "INVALID_DISPLAY_NAME" => "Tên hiển thị không hợp lệ (không để trống, tối đa 100 ký tự).",
+                "INVALID_DISPLAY_NAME" => "Tên hiển thị không hợp lệ (không để trống, tối đa 50 ký tự).",
+                "INVALID_BIO" => "Giới thiệu quá dài (tối đa 200 ký tự).",
+                "VALIDATION_ERROR" => "Dữ liệu chưa hợp lệ, vui lòng kiểm tra lại.",
                 "UNAUTHORIZED" => "Bạn cần đăng nhập.",
                 "INVALID_CSRF_TOKEN" => "Phiên làm việc hết hạn, vui lòng tải lại trang.",
                 "NETWORK_ERROR" => "Không kết nối được máy chủ.",
@@ -117,6 +191,81 @@
         finally
         {
             _saving = false;
+        }
+    }
+
+    // Chọn ảnh xong thì kiểm tra loại và dung lượng ngay ở FE, đạt mới tải lên
+    private async Task OnAvatarSelectedAsync(InputFileChangeEventArgs e)
+    {
+        if (_profile is null || _avatarBusy)
+            return;
+
+        _avatarError = null;
+        _avatarNotice = null;
+
+        var file = e.File;
+        var contentType = ResolveContentType(file);
+
+        if (!ProfileLimits.AvatarContentTypes.Contains(contentType))
+        {
+            _avatarError = "Chỉ nhận ảnh JPG, PNG hoặc WebP.";
+            return;
+        }
+
+        if (file.Size > ProfileLimits.AvatarMaxBytes)
+        {
+            _avatarError = $"Ảnh quá lớn ({FormatSize(file.Size)}). Tối đa 2 MB.";
+            return;
+        }
+
+        _avatarBusy = true;
+
+        try
+        {
+            // OpenReadStream mặc định chỉ cho đọc 500 KB nên phải nói rõ giới hạn 2 MB
+            await using var stream = file.OpenReadStream(ProfileLimits.AvatarMaxBytes);
+            _profile = await ProfileApi.UploadAvatarAsync(stream, file.Name, contentType);
+
+            _avatarNotice = "Đã cập nhật ảnh đại diện.";
+            Profiles.Invalidate(_profile.Id); // mọi nơi đang hiện ảnh của bạn sẽ tải lại
+        }
+        catch (ApiException ex)
+        {
+            _avatarError = AvatarError(ex.Code);
+        }
+        catch (IOException)
+        {
+            _avatarError = "Không đọc được tệp ảnh, vui lòng chọn lại.";
+        }
+        finally
+        {
+            _avatarBusy = false;
+        }
+    }
+
+    private async Task RemoveAvatarAsync()
+    {
+        if (_profile is null || _avatarBusy)
+            return;
+
+        _avatarBusy = true;
+        _avatarError = null;
+        _avatarNotice = null;
+
+        try
+        {
+            await ProfileApi.DeleteAvatarAsync();
+            _profile.AvatarUrl = null;
+            _avatarNotice = "Đã xóa ảnh đại diện.";
+            Profiles.Invalidate(_profile.Id);
+        }
+        catch (ApiException ex)
+        {
+            _avatarError = AvatarError(ex.Code);
+        }
+        finally
+        {
+            _avatarBusy = false;
         }
     }
 
@@ -133,10 +282,42 @@
         }
     }
 
+    // Trình duyệt đôi khi không báo loại tệp: suy từ đuôi tệp
+    private static string ResolveContentType(IBrowserFile file)
+    {
+        if (!string.IsNullOrEmpty(file.ContentType))
+            return file.ContentType;
+
+        return Path.GetExtension(file.Name).ToLowerInvariant() switch
+        {
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".png" => "image/png",
+            ".webp" => "image/webp",
+            _ => ""
+        };
+    }
+
+    private static string AvatarError(string code) => code switch
+    {
+        "FILE_TOO_LARGE" => "Ảnh quá lớn, tối đa 2 MB.",
+        "UNSUPPORTED_FILE_TYPE" => "Chỉ nhận ảnh JPG, PNG hoặc WebP.",
+        "VALIDATION_ERROR" => "Tệp ảnh không hợp lệ.",
+        "UNAUTHORIZED" => "Bạn cần đăng nhập.",
+        "INVALID_CSRF_TOKEN" => "Phiên làm việc hết hạn, vui lòng tải lại trang.",
+        "NETWORK_ERROR" => "Không kết nối được máy chủ.",
+        _ => "Không cập nhật được ảnh, vui lòng thử lại."
+    };
+
+    private static string FormatSize(long bytes) =>
+        bytes >= 1024 * 1024 ? $"{bytes / 1024.0 / 1024.0:0.#} MB" : $"{bytes / 1024.0:0.#} KB";
+
     private class ProfileInput
     {
         [Required(ErrorMessage = "Vui lòng nhập tên hiển thị.")]
-        [StringLength(100, ErrorMessage = "Tối đa 100 ký tự.")]
+        [StringLength(ProfileLimits.DisplayNameMax, ErrorMessage = "Tối đa 50 ký tự.")]
         public string DisplayName { get; set; } = "";
+
+        [StringLength(ProfileLimits.BioMax, ErrorMessage = "Tối đa 200 ký tự.")]
+        public string? Bio { get; set; } = "";
     }
 }

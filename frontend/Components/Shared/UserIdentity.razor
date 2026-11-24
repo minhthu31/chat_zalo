@@ -1,0 +1,78 @@
+@implements IDisposable
+@inject ProfileCache Profiles
+@using global::Chat.Client.Services
+
+@* Khối "ai đó": ảnh đại diện + tên (bấm vào mở hồ sơ) + @tên-đăng-nhập + (tùy chọn) Bio. Dùng chung cho tìm kiếm, bạn bè, thành viên nhóm. *@
+<span class="person">
+    <UserAvatar UserId="UserId" DisplayName="@DisplayName" Size="@Size" />
+
+    <span class="person-text">
+        <span class="person-name">
+            @if (Link)
+            {
+                <a href="/users/@UserId">@DisplayName</a>
+            }
+            else
+            {
+                @DisplayName
+            }
+            @ChildContent
+        </span>
+        <span class="muted">@@@Username</span>
+        @if (ShowBio && !string.IsNullOrWhiteSpace(_bio))
+        {
+            <span class="person-bio" title="@_bio">@_bio</span>
+        }
+    </span>
+</span>
+
+@code {
+    [Parameter, EditorRequired]
+    public Guid UserId { get; set; }
+
+    [Parameter]
+    public string DisplayName { get; set; } = "";
+
+    [Parameter]
+    public string Username { get; set; } = "";
+
+    // "sm", "" hoặc "lg" như UserAvatar
+    [Parameter]
+    public string Size { get; set; } = "";
+
+    // Hiện một dòng Bio dưới tên (cần hỏi thêm hồ sơ; đã có bộ nhớ đệm nên không tốn thêm khi lặp lại)
+    [Parameter]
+    public bool ShowBio { get; set; }
+
+    // Tên có là liên kết tới trang hồ sơ không
+    [Parameter]
+    public bool Link { get; set; } = true;
+
+    // Chỗ chèn thêm nhãn cạnh tên (ví dụ nhãn "Bạn")
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+
+    private string? _bio;
+    private Guid _loadedFor;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!ShowBio || UserId == _loadedFor)
+            return;
+
+        Profiles.Changed -= OnProfileChanged;
+        _loadedFor = UserId;
+        Profiles.Changed += OnProfileChanged;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync() => _bio = (await Profiles.GetAsync(UserId))?.Bio;
+
+    private void OnProfileChanged(Guid changed)
+    {
+        if (changed == UserId)
+            _ = InvokeAsync(async () => { await LoadAsync(); StateHasChanged(); });
+    }
+
+    public void Dispose() => Profiles.Changed -= OnProfileChanged;
+}

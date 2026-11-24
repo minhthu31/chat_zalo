@@ -1,0 +1,68 @@
+@using global::Chat.Client.Models
+@using global::Chat.Client.Services
+@inject ApiRequestSender Api
+
+@* Tệp đính kèm của một tin: ảnh hiện thẳng trong khung chat, tệp khác hiện thông tin và nút Xem / Tải.
+   Backend trả đường dẫn tương đối; ảnh và liên kết dùng cookie đăng nhập nên chỉ người có quyền xem tin mới mở được. *@
+@if (Items.Count > 0)
+{
+    <div class="attachments">
+        @foreach (var file in Items)
+        {
+            @if (file.IsImage)
+            {
+                <figure class="att-image" @key="file.Id">
+                    <a href="@Url(file.ContentUrl)" target="_blank" rel="noopener" title="Bấm để xem ảnh đầy đủ">
+                        <img src="@Url(file.ContentUrl)" alt="@file.FileName" />
+                    </a>
+                    <figcaption>
+                        <span class="att-name" title="@file.FileName">@file.FileName</span>
+                        <small>@AttachmentLimits.FormatSize(file.SizeBytes)</small>
+                        <a class="att-link" href="@Url(file.DownloadUrl)" download="@file.FileName">Tải</a>
+                    </figcaption>
+                </figure>
+            }
+            else
+            {
+                <div class="att-file" @key="file.Id">
+                    <span class="att-icon" aria-hidden="true">@Icon(file)</span>
+                    <span class="att-meta">
+                        <span class="att-name" title="@file.FileName">@file.FileName</span>
+                        <small>@Kind(file) · @AttachmentLimits.FormatSize(file.SizeBytes)</small>
+                    </span>
+                    <span class="att-actions">
+                        <a class="btn btn-sm" href="@Url(file.ContentUrl)" target="_blank" rel="noopener">Xem</a>
+                        <a class="btn btn-sm" href="@Url(file.DownloadUrl)" download="@file.FileName">Tải</a>
+                    </span>
+                </div>
+            }
+        }
+    </div>
+}
+
+@code {
+    [Parameter]
+    public IReadOnlyList<AttachmentDto> Items { get; set; } = [];
+
+    private string Url(string relative) => Api.ToAbsoluteUri(relative).ToString();
+
+    private static string Icon(AttachmentDto file) => Extension(file) switch
+    {
+        ".pdf" => "📄",
+        ".docx" => "📝",
+        ".xlsx" => "📊",
+        ".txt" => "📃",
+        _ => "📎"
+    };
+
+    private static string Kind(AttachmentDto file) => Extension(file) switch
+    {
+        ".pdf" => "PDF",
+        ".docx" => "Word",
+        ".xlsx" => "Excel",
+        ".txt" => "Văn bản",
+        _ => "Tệp"
+    };
+
+    private static string Extension(AttachmentDto file) => Path.GetExtension(file.FileName).ToLowerInvariant();
+}

@@ -1,0 +1,29 @@
+@using global::Chat.Client.Models
+
+@* Banner nổi góc dưới bên phải báo có tin mới ở hội thoại khác. Bấm vào banner để mở hội thoại đó. *@
+@if (Items.Count > 0)
+{
+    <div class="toast-stack" role="status" aria-live="polite">
+        @foreach (var toast in Items)
+        {
+            <div class="toast" @key="toast.Id">
+                <button type="button" class="toast-body" @onclick="() => OnOpen.InvokeAsync(toast)">
+                    <strong>@toast.Title</strong>
+                    <span>@toast.Text</span>
+                </button>
+                <button type="button" class="toast-close" aria-label="Đóng thông báo" @onclick="() => OnDismiss.InvokeAsync(toast)">×</button>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    [Parameter]
+    public IReadOnlyList<ToastItem> Items { get; set; } = [];
+
+    [Parameter]
+    public EventCallback<ToastItem> OnOpen { get; set; }
+
+    [Parameter]
+    public EventCallback<ToastItem> OnDismiss { get; set; }
+}

@@ -3,6 +3,7 @@
 @using global::Chat.Client.Services
 @using global::Chat.Client.State
 @using global::Chat.Client.Components.Auth
+@using global::Chat.Client.Components.Friendship
 @using global::Chat.Client.Components.Messaging
 @using global::Chat.Client.Components.Conversations
 @using global::Chat.Client.Components.Messages
@@ -12,6 +13,11 @@
 @inject ApiRequestSender RequestSender
 @inject IFriendshipApiClient FriendshipApi
 @inject IGroupApiClient GroupApi
+@inject IAttachmentApiClient AttachmentApi
+@inject IMessageReceiptApiClient ReceiptApi
+@inject IBlockApiClient BlockApi
+@inject IJSRuntime JS
+@inject NotificationService Notifications
 @inject HttpClient Http
 
 <PageTitle>Tin nhắn · chat_zalo</PageTitle>
@@ -36,15 +42,9 @@
         <div class="chat-layout direct-layout">
             <aside class="chat-sidebar">
                 <h2 class="section-title">Hội thoại <small>(@conversations.Count)</small></h2>
-                <form class="new-conversation" @onsubmit="CreateAsync" @onsubmit:preventDefault>
-                    <label for="chat-friend">Bắt đầu với bạn bè</label>
-                    <select id="chat-friend" @bind="targetFriend" disabled="@(creating || refreshing)">
-                        <option value="@Guid.Empty">Chọn bạn bè</option>
-                        @foreach (var friend in friends) { <option value="@friend.UserId">@friend.DisplayName (@friend.Username)</option> }
-                    </select>
-                    <button class="btn btn-primary btn-sm" type="submit" disabled="@(targetFriend == Guid.Empty || creating)">@(creating ? "Đang mở…" : "Mở trò chuyện")</button>
-                    @if (!refreshing && friends.Count == 0) { <small class="muted">Chưa có bạn bè. <a href="/users/search">Tìm và kết bạn</a> để bắt đầu.</small> }
-                </form>
+                <div class="new-conversation">
+                    <FriendChatSearch OnOpen="OpenWithFriendAsync" Disabled="@(creating || refreshing)" />
+                </div>
                 @if (refreshing && conversations.Count == 0) { <p class="muted">Đang tải hội thoại…</p> }
                 else
                 {
@@ -54,17 +54,21 @@
             <main class="chat-main">
                 @if (session.State.SelectedId is Guid id && session.State.Active is { } active)
                 {
-                    <div class="chat-topbar"><span class="avatar">@ConversationTitle(id)[..1].ToUpperInvariant()</span><div><h2>@ConversationTitle(id)</h2><small class="muted">@(IsGroup(id) ? (membersFor == id ? $"Nhóm · {senderNames.Count} thành viên · " : "Nhóm · ") : "Trò chuyện cá nhân · ")Tin nhắn được lưu trên hệ thống</small></div>@if (IsGroup(id)) { <a class="btn btn-sm" href="/groups/@id">Xem nhóm</a> }</div>
+                    <div class="chat-topbar"><span class="avatar">@ConversationTitle(id)[..1].ToUpperInvariant()</span><div><h2>@ConversationTitle(id)</h2><small class="muted">@(IsGroup(id) ? (membersFor == id ? $"Nhóm · {senderNames.Count} thành viên · " : "Nhóm · ") : "Trò chuyện cá nhân · ")Tin nhắn được lưu trên hệ thống</small></div>@if (IsGroup(id)) { <a class="btn btn-sm" href="/groups/@id">Xem nhóm</a> }<ConversationMuteButton ConversationId="id" /></div>
                     @if (active.Loading) { <p class="chat-loading" role="status">Đang tải tin nhắn…</p> }
                     <button class="btn btn-sm older" @onclick="LoadOlderAsync" disabled="@(!active.HasOlder || active.Loading)">Tải tin nhắn cũ hơn</button>
                     <MessageList Items="active.Messages" CurrentUserId="Auth.CurrentUser!.Id"
                                  SenderNames="@(IsGroup(id) ? senderNames : null)"
+                                 Attachments="active.Extras().Attachments"
+                                 StatusFor="@(m => receipts?.StatusFor(id, m, Auth.CurrentUser!.Id, IsGroup(id), blockedByMe))"
                                  ConversationId="id" HasOlder="active.HasOlder" Loading="active.Loading" OnLoadOlder="LoadOlderAsync"
+                                 OnSeen="@(ids => OnMessagesSeenAsync(id, ids))"
                                  UnknownSenderLabel="@(IsGroup(id) ? "Thành viên đã rời nhóm" : "Đối phương")" />
                     @if (errors.TryGetValue(id, out var sendError)) { <p class="alert alert-error" role="alert">@sendError</p> }
                     @if (sendPermissions.TryGetValue(id, out var canSend) && !canSend) { <p class="muted">Bạn cần đang là bạn bè và bỏ chặn để gửi tin nhắn.</p> }
                     <ChatComposer @key="id" Body="@active.Draft" BodyChanged="value => active.Draft = value"
-                                  Retry="@(active.Pending is not null)" Disabled="@(active.Sending || !active.Initialized || (sendPermissions.TryGetValue(id, out var allowed) && !allowed))" OnSend="SendAsync" />
+                                  Retry="@(active.Pending is not null)" Disabled="@(active.Sending || !active.Initialized || (sendPermissions.TryGetValue(id, out var allowed) && !allowed))" OnSend="SendAsync"
+                                  Files="active.Extras().Files" OnFilesChanged="OnFilesChangedAsync" UploadStatus="@active.Extras().UploadStatus" />
                 }
                 else { <div class="chat-empty"><span class="brand-mark">C</span><h2>Chào mừng đến chat_zalo</h2><p>Chọn một hội thoại hoặc bắt đầu trò chuyện với bạn bè.</p></div> }
             </main>
@@ -75,6 +79,7 @@
         </div>
     }
     @if (error is not null) { <p class="alert alert-error chat-global-error" role="alert">@error</p> }
+    <NewMessageToasts Items="toasts" OnOpen="OpenToastAsync" OnDismiss="DismissToast" />
 </section>
 </div>
 
@@ -157,10 +162,14 @@
     {
         Auth.OnChange += OnAuthChanged;
         conversationsApi = new ConversationsApiClient(RequestSender);
-        session = new ChatSession(new MessagesApiClient(RequestSender, PageSize), PageSize);
+        messagesApi = new MessagesApiClient(RequestSender, PageSize);
+        session = new ChatSession(messagesApi, PageSize);
+        attachmentCoordinator = new AttachmentCoordinator(session, AttachmentApi);
+        receipts = new ReceiptCoordinator(session, ReceiptApi);
         hub = new ChatHubClient(Http);
         hub.ConversationChanged += OnChanged;
         hub.Reconnected += OnReconnected;
+        hub.ReceiptChanged += OnReceiptChanged;
         hub.StatusChanged += OnConnectionChanged;
         hub.SubscriptionFailed += OnSubscriptionFailed;
         groupConversations = new GroupAwareConversations(conversationsApi, GroupApi);
@@ -171,6 +180,7 @@
         initializing = false;
         if (Auth.IsAuthenticated)
         {
+            await LoadBlockedAsync();
             await RefreshAsync();
             if (!disposed && !discoveryLifetime.IsCancellationRequested)
                 discoveryLoop = DiscoverConversationsAsync(discoveryLifetime.Token);
@@ -189,6 +199,8 @@
             conversationPeers.Clear();
             sendPermissions.Clear();
             senderNames.Clear();
+            toasts.Clear();
+            Notifications.Forget();
             membersFor = null;
             friends.Clear();
             errors.Clear();
@@ -217,9 +229,167 @@
         StateHasChanged();
     });
 
+    private readonly List<ToastItem> toasts = [];
+    private IJSObjectReference? notifyModule;
+    private MessagesApiClient? messagesApi;
+    private AttachmentCoordinator? attachmentCoordinator;
+
+    private async Task<IJSObjectReference> NotifyModuleAsync() =>
+        notifyModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/notify.js");
+
+    // Có tin mới ở một hội thoại: báo bằng banner và âm thanh, TRỪ KHI đang xem đúng hội thoại đó hoặc đã tắt thông báo.
+    // Tắt thông báo chỉ tắt phần báo này; tin vẫn được nhận và lưu bình thường (hợp đồng Sprint 3, mục 4).
+    private async Task NotifyIfNeededAsync(Guid conversationId, long previousSeq, long latestSeq)
+    {
+        if (disposed || latestSeq <= previousSeq || messagesApi is null || Auth.CurrentUser is null) return;
+
+        try
+        {
+            var module = await NotifyModuleAsync();
+            // Đang xem đúng hội thoại này (và đang nhìn trang): RunAsync đã đồng bộ và báo "đã xem", không cần banner
+            if (session?.State.SelectedId == conversationId && await module.InvokeAsync<bool>("isActive")) return;
+
+            // Lấy tin mới: vừa để biết ai gửi, vừa là lúc "thiết bị đã lấy được dữ liệu tin" nên báo ĐÃ NHẬN lên backend.
+            // Báo "đã nhận" làm cả khi hội thoại đã tắt thông báo: tắt thông báo chỉ tắt âm/banner, không ngừng xác nhận.
+            var after = previousSeq > 0 ? previousSeq : Math.Max(0, latestSeq - 1);
+            var fresh = await messagesApi.GetNewAsync(conversationId, after);
+            var visible = fresh.Where(m => m.ConversationId == conversationId).OrderBy(m => m.Seq).ToList();
+            if (visible.Count == 0) return;
+            if (receipts is not null) await receipts.MarkDeliveredAsync(conversationId, IsGroup(conversationId), Auth.CurrentUser.Id, visible);
+
+            if (await Notifications.IsMutedAsync(conversationId)) return;
+
+            // Tin do chính mình gửi (ví dụ từ thiết bị khác) thì không báo
+            var last = visible[^1];
+            if (last.SenderUserId == Auth.CurrentUser.Id) return;
+
+            var text = string.IsNullOrWhiteSpace(last.Body)
+                ? "Đã gửi một tệp đính kèm"
+                : last.Body.Length > 80 ? last.Body[..80] + "…" : last.Body;
+
+            AddToast(new ToastItem(Guid.NewGuid(), conversationId, ConversationTitle(conversationId), text));
+            await module.InvokeVoidAsync("beep");
+        }
+        catch (Exception)
+        {
+            // Báo tin là phụ: lỗi mạng hoặc trình duyệt chặn âm thanh không được làm hỏng chat
+        }
+    }
+
+    private bool networkErrorShown;   // dòng lỗi đang hiện là lỗi mạng (sẽ tự mất khi kết nối lại)
+    private ReceiptCoordinator? receipts;
+    private HashSet<Guid> blockedByMe = [];
+    private IDisposable? activityReference;
+
+    // Người mình đã chặn không xem được tin của mình nên không tính là "đã nhận/đã xem" tin đó
+    private async Task LoadBlockedAsync()
+    {
+        try { blockedByMe = (await BlockApi.GetAsync()).Select(b => b.UserId).ToHashSet(); }
+        catch (ApiException) { /* không có danh sách chặn thì vẫn hiện trạng thái, chỉ kém chính xác khi có chặn */ }
+    }
+
+    // Báo lên backend: đã NHẬN tin tới seq lớn nhất đang có; và nếu người dùng đang NHÌN trang này thì đã XEM tới đó
+    private async Task MarkReceiptsAsync(Guid id)
+    {
+        if (receipts is null || session is null || disposed) return;
+
+        var me = Auth.CurrentUser?.Id ?? Guid.Empty;
+        var messages = session.State.For(id).Messages.ToList();
+        if (messages.Count == 0) return;
+        var group = IsGroup(id);
+
+        await receipts.MarkDeliveredAsync(id, group, me, messages);
+
+        // Nhóm: "đã xem" KHÔNG báo ở đây. Chỉ báo cho những tin đang nằm trong vùng nhìn thấy (xem OnMessagesSeenAsync),
+        // vì tin cũ vừa hiện lại phía trên (sau khi bỏ chặn, hoặc vừa tải thêm) chưa được người dùng nhìn tới.
+        if (group) return;
+
+        try
+        {
+            var module = await NotifyModuleAsync();
+            if (session.State.SelectedId == id && await module.InvokeAsync<bool>("isActive"))
+                await receipts.MarkReadAsync(id, group, me, messages);
+        }
+        catch (Exception)
+        {
+            // Không đọc được trạng thái trang: bỏ qua, lần sau báo
+        }
+    }
+
+    // Chat nhóm: danh sách tin đang nằm trong vùng nhìn thấy (trang đang hoạt động) -> báo "đã xem" đúng những tin đó
+    private async Task OnMessagesSeenAsync(Guid conversationId, IReadOnlyList<Guid> ids)
+    {
+        if (disposed || receipts is null || session is null || Auth.CurrentUser is null) return;
+        if (session.State.SelectedId != conversationId || !IsGroup(conversationId)) return;
+
+        var seenIds = ids.ToHashSet();
+        var seen = session.State.For(conversationId).Messages.Where(m => seenIds.Contains(m.Id)).ToList();
+        if (seen.Count == 0) return;
+
+        // Xác nhận "đã xem" chỉ cho các tin đang nhìn thấy (xác nhận "xem" của backend cũng ghi luôn "nhận")
+        await receipts.MarkReadAsync(conversationId, true, Auth.CurrentUser.Id, seen);
+    }
+
+    // Có người đổi mốc đã nhận/đã xem (SignalR): cập nhật chữ dưới tin
+    private Task OnReceiptChanged(MessageReceiptChanged change) => InvokeAsync(async () =>
+    {
+        if (disposed || receipts is null || !Auth.IsAuthenticated) return;
+        if (!receipts.Apply(change, Auth.CurrentUser!.Id)) await receipts.LoadAsync(change.ConversationId, IsGroup(change.ConversationId), Auth.CurrentUser.Id); // người mới chưa có tên: hỏi API để ghép tên
+        if (!disposed) StateHasChanged();
+    });
+
+    // Người dùng quay lại trang (bấm vào cửa sổ, chuyển lại tab): lúc đó mới tính là "đã xem" các tin đến khi họ vắng mặt
+    [JSInvokable]
+    public Task OnPageActivated() => InvokeAsync(async () =>
+    {
+        if (disposed || session?.State.SelectedId is not Guid id) return;
+        await MarkReceiptsAsync(id);
+        if (!disposed) StateHasChanged();
+    });
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || disposed) return;
+
+        try
+        {
+            var module = await NotifyModuleAsync();
+            activityReference = DotNetObjectReference.Create(this);
+            await module.InvokeVoidAsync("watchActivity", activityReference);
+        }
+        catch (Exception)
+        {
+            // Không theo dõi được: vẫn báo "đã xem" khi mở hội thoại, chỉ kém chính xác khi quay lại tab
+        }
+    }
+
+    private void AddToast(ToastItem toast)
+    {
+        toasts.Add(toast);
+        if (toasts.Count > 3) toasts.RemoveAt(0);
+
+        // Tự tắt sau 7 giây
+        _ = Task.Delay(TimeSpan.FromSeconds(7)).ContinueWith(_ => InvokeAsync(() =>
+        {
+            if (disposed) return;
+            toasts.Remove(toast);
+            StateHasChanged();
+        }));
+    }
+
+    private void DismissToast(ToastItem toast) => toasts.Remove(toast);
+
+    private Task OpenToastAsync(ToastItem toast)
+    {
+        toasts.Remove(toast);
+        return SelectAsync(toast.ConversationId);
+    }
+
     private Task OnChanged(ConversationChanged change) => InvokeAsync(async () =>
     {
         if (disposed || session is null || !Auth.IsAuthenticated) return;
+        // Ghi lại mốc cũ TRƯỚC khi làm mới danh sách, để biết có tin mới thật hay không
+        var previousSeq = conversations.FirstOrDefault(c => c.Id == change.ConversationId)?.LastMessageSeq ?? 0;
         if (!conversations.Any(c => c.Id == change.ConversationId)) await RefreshAsync();
         conversations = conversations.Select(c => c.Id == change.ConversationId
             ? c with { LastMessageSeq = Math.Max(c.LastMessageSeq, change.LatestSeq) } : c).ToList();
@@ -228,14 +398,23 @@
             await RunAsync(change.ConversationId, () => session.SyncAsync(change.ConversationId));
             await EnsureMembersAsync(change.ConversationId, force: true);
         }
+        await NotifyIfNeededAsync(change.ConversationId, previousSeq, change.LatestSeq);
         if (!disposed) StateHasChanged();
     });
 
     private Task OnReconnected() => InvokeAsync(async () =>
     {
         if (disposed || session is null || !Auth.IsAuthenticated) return;
+        // Kết nối lại: cài đặt thông báo có thể đã đổi trên thiết bị khác nên đọc lại từ backend
+        Notifications.Forget();
         if (session.State.SelectedId is Guid id)
+        {
             await RunAsync(id, () => IsGroup(id) ? session.RefreshVisibleAsync(id) : session.SyncAsync(id));
+            await Notifications.RefreshAsync(id);
+            // Hợp đồng: kết nối lại thì Join lại -> đồng bộ tin (xong ở trên) -> tải lại mốc đã nhận/đã xem và cài đặt thông báo
+            if (receipts is not null) await receipts.LoadAsync(id, IsGroup(id), Auth.CurrentUser!.Id);
+        }
+        await LoadBlockedAsync();
         if (!disposed) StateHasChanged();
     });
 
@@ -254,6 +433,8 @@
                     {
                         var items = await discovery.RefreshAsync(ct);
                         if (disposed || ct.IsCancellationRequested || !Auth.IsAuthenticated || revision != conversationRevision) return;
+                        // Gọi được backend trở lại: bỏ dòng báo "mất kết nối" cũ (chỉ loại lỗi mạng, giữ các thông báo quan trọng khác)
+                        if (networkErrorShown) { error = null; networkErrorShown = false; }
                         items = items.Where(c => c.Kind is "Direct" or "Group").ToList();
                         // Nhóm đang xem vừa biến mất khỏi danh sách (rời nhóm, bị xóa, nhóm giải tán): phải ghi nhận
                         // TRƯỚC khi cập nhật danh sách, để báo cho người dùng biết vì sao chat chuyển sang hội thoại khác
@@ -286,6 +467,7 @@
                             friends.Clear();
                         }
                         error = Describe(ex);
+                        networkErrorShown = ex is ApiException { Code: "NETWORK_ERROR" };
                     }
                     if (!disposed) StateHasChanged();
                 });
@@ -347,6 +529,13 @@
         finally { refreshing = false; }
     }
 
+    // Bấm "Nhắn tin" ở một người bạn trong ô tìm kiếm: mở (hoặc tạo) cuộc trò chuyện 1-1 với người đó
+    private Task OpenWithFriendAsync(Guid friendId)
+    {
+        targetFriend = friendId;
+        return CreateAsync();
+    }
+
     private async Task CreateAsync()
     {
         if (creating || refreshing || targetFriend == Guid.Empty || conversationsApi is null || session is null) return;
@@ -376,6 +565,7 @@
         owner.State.SelectedId = id;
         await RunAsync(id, () => IsGroup(id) ? owner.RefreshVisibleAsync(id) : owner.SyncAsync(id));
         await EnsureMembersAsync(id);
+        if (receipts is not null) await receipts.LoadAsync(id, IsGroup(id), Auth.CurrentUser!.Id); // mốc đã nhận/đã xem của những người trong hội thoại
     }
 
     private Task LoadOlderAsync()
@@ -386,14 +576,36 @@
     private Task SendAsync()
     {
         var owner = session;
-        return owner?.State.SelectedId is Guid id ? RunAsync(id, () => owner.SendAsync(id)) : Task.CompletedTask;
+        if (owner?.State.SelectedId is not Guid id) return Task.CompletedTask;
+
+        // Có tệp được chọn thì gửi tin kèm tệp (tải lên rồi gửi), không thì gửi tin chữ như cũ
+        if (owner.State.For(id).Extras().Files.Count > 0 && attachmentCoordinator is not null)
+            return RunAsync(id, () => attachmentCoordinator.SendWithFilesAsync(id, () => _ = InvokeAsync(StateHasChanged)));
+
+        return RunAsync(id, () => owner.SendAsync(id));
     }
+
+    // Người dùng thêm/bỏ tệp trong ô soạn tin: vẽ lại để hiện danh sách tệp
+    private Task OnFilesChangedAsync() => Task.CompletedTask;
 
     private async Task RunAsync(Guid id, Func<Task> operation)
     {
         var owner = session;
         errors.Remove(id);
-        try { await operation(); }
+        try
+        {
+            await operation();
+            // Tin vừa tải/đồng bộ về có thể kèm tệp: hỏi backend để hiện ảnh/tệp (lỗi thì bỏ qua, tin chữ vẫn hiện)
+            if (attachmentCoordinator is not null) await attachmentCoordinator.EnrichAsync(id);
+            // Đã lấy được tin về máy: báo "đã nhận"; nếu đang mở hội thoại này và nhìn thấy trang thì báo "đã xem"
+            if (session?.State.SelectedId == id)
+            {
+                // Nhóm: tin mới về máy (trang tin cũ vừa cuộn lên, tin hiện lại sau khi bỏ chặn) thì hỏi trạng thái người nhận/xem của
+                // đúng những tin đó trước, rồi mới báo "đã nhận" (để biết tin nào mình đã báo rồi)
+                if (receipts is not null && IsGroup(id) && Auth.CurrentUser is not null) await receipts.LoadMissingAsync(id, Auth.CurrentUser.Id);
+                await MarkReceiptsAsync(id);
+            }
+        }
         catch (Exception ex)
         {
             if (disposed || owner != session) return;
@@ -409,14 +621,21 @@
                 conversations.Clear();
                 error = Describe(ex);
             }
-            else errors[id] = Describe(ex);
+            else
+            {
+                // Lỗi không phải của API (ví dụ lỗi đọc tệp): người dùng thấy câu chung, chi tiết ghi ra Console của trình duyệt để dễ tìm lỗi
+                if (ex is not ApiException and not AttachmentSendException) Console.Error.WriteLine($"[chat] {ex}");
+                errors[id] = Describe(ex);
+            }
         }
     }
 
     private static string Describe(Exception ex) => ex switch
     {
         ApiException { StatusCode: 401 } => "Phiên đăng nhập hết hạn. Vui lòng đăng nhập lại.",
-        ApiException api => $"{api.Code}: {api.Message}",
+        AttachmentSendException attachment => attachment.Message,
+        ApiException { Code: "NETWORK_ERROR" } => "Mất kết nối tới máy chủ. Tin nhắn sẽ tự đồng bộ khi có mạng lại.",
+        ApiException api =>$"{api.Code}: {api.Message}",
         _ => "Không thể hoàn tất yêu cầu. Kiểm tra kết nối và thử lại."
     };
 
@@ -428,6 +647,16 @@
         Auth.OnChange -= OnAuthChanged;
         if (discoveryLoop is not null) await discoveryLoop;
         if (hub is not null) await hub.DisposeAsync();
+        if (notifyModule is not null)
+        {
+            try
+            {
+                await notifyModule.InvokeVoidAsync("unwatchActivity");
+                await notifyModule.DisposeAsync();
+            }
+            catch (JSDisconnectedException) { }
+        }
+        activityReference?.Dispose();
         discoveryLifetime.Dispose();
     }
 }

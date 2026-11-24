@@ -10,6 +10,8 @@ public sealed class ChatHubClient(HttpClient http) : IAsyncDisposable
     private readonly SemaphoreSlim gate = new(1, 1);
     private bool disposed;
     public event Func<ConversationChanged, Task>? ConversationChanged;
+    // Ai đó vừa đổi mốc đã nhận / đã xem (hợp đồng Sprint 3, mục 6)
+    public event Func<MessageReceiptChanged, Task>? ReceiptChanged;
     public event Func<Task>? Reconnected;
     public event Func<HubConnectionState, Task>? StatusChanged;
     public event Func<Exception, Task>? SubscriptionFailed;
@@ -32,6 +34,11 @@ public sealed class ChatHubClient(HttpClient http) : IAsyncDisposable
                 {
                     if (!disposed && ConversationChanged is { } handlers)
                         foreach (Func<ConversationChanged, Task> handler in handlers.GetInvocationList()) await handler(change);
+                });
+                connection.On<MessageReceiptChanged>("MessageReceiptChanged", async change =>
+                {
+                    if (!disposed && ReceiptChanged is { } handlers)
+                        foreach (Func<MessageReceiptChanged, Task> handler in handlers.GetInvocationList()) await handler(change);
                 });
                 connection.Reconnecting += _ => NotifyAsync(HubConnectionState.Reconnecting);
                 connection.Closed += _ => NotifyAsync(HubConnectionState.Disconnected);

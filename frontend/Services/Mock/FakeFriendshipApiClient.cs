@@ -85,6 +85,35 @@ public class FakeFriendshipApiClient : IFriendshipApiClient
             throw new ApiException(404, "FRIENDSHIP_NOT_FOUND", "Friendship not found");
     }
 
+    public async Task<PagedFriendSearchResponse> SearchFriendsAsync(string keyword, int page, int pageSize)
+    {
+        await Task.Delay(300);
+
+        if (page < 1)
+            throw new ApiException(400, "INVALID_PAGE", "Page must be >= 1");
+        if (pageSize is < 1 or > 100)
+            throw new ApiException(400, "INVALID_PAGE_SIZE", "PageSize must be between 1 and 100");
+
+        var key = keyword.Trim();
+        var matches = _friends
+            .Where(f => key == ""
+                        || f.Username.Contains(key, StringComparison.OrdinalIgnoreCase)
+                        || f.DisplayName.Contains(key, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(f => f.Username, StringComparer.Ordinal)
+            .ToList();
+
+        return new PagedFriendSearchResponse
+        {
+            Items = matches.Skip((page - 1) * pageSize).Take(pageSize)
+                .Select(f => new SearchFriendDto { Id = f.UserId, Username = f.Username, DisplayName = f.DisplayName })
+                .ToList(),
+            Page = page,
+            PageSize = pageSize,
+            TotalCount = matches.Count,
+            TotalPages = (int)Math.Ceiling(matches.Count / (double)pageSize)
+        };
+    }
+
     private static FriendshipDto ToDto(UserDto user, FriendshipStatus status) => new()
     {
         UserId = user.Id,

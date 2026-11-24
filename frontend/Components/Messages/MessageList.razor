@@ -1,13 +1,30 @@
 @implements IAsyncDisposable
 @inject IJSRuntime JS
 @using global::Chat.Client.Models
+@using global::Chat.Client.Services
 <ul @ref="_element" class="messages" aria-label="Tin nhắn">
     @if (Items.Count == 0) { <li>Chưa có tin nhắn.</li> }
+    @{
+        // Hôm nay tính theo múi giờ của người dùng; previousDay nhớ ngày của tin liền trước để chèn vạch ngăn ngày
+        var today = DateOnly.FromDateTime(DateTime.Now);
+        DateOnly? previousDay = null;
+    }
     @foreach (var message in Items)
     {
-        <li @key="message.Id" class="@(message.SenderUserId == CurrentUserId ? "mine" : "")">
+        var local = LocalTime.ToLocal(message.CreatedAt);
+        var day = DateOnly.FromDateTime(local);
+        @if (previousDay != day)
+        {
+            <li @key="@($"day-{day:yyyyMMdd}")" class="day-sep" role="separator"><span>@LocalTime.DayLabel(day, today)</span></li>
+            previousDay = day;
+        }
+        <li @key="message.Id" data-message-id="@message.Id" class="@(message.SenderUserId == CurrentUserId ? "mine" : "")">
             <strong>@SenderLabel(message)</strong>
-            <p>@message.Body</p><small>#@message.Seq · @message.CreatedAt.ToLocalTime().ToString("HH:mm")</small>
+            @* Tin chỉ có tệp có nội dung chữ rỗng: không vẽ đoạn chữ trống *@
+            @if (!string.IsNullOrEmpty(message.Body)) { <p>@message.Body</p> }
+            @if (Attachments is not null && Attachments.TryGetValue(message.Id, out var files)) { <AttachmentList Items="files" /> }
+            @{ var status = StatusFor?.Invoke(message); }
+            <small title="@LocalTime.Full(local)">#@message.Seq · @LocalTime.Time(local)@(status is null ? "" : " · " + status)</small>
         </li>
     }
 </ul>
@@ -16,8 +33,11 @@
     [Parameter] public bool HasOlder { get; set; }
     [Parameter] public bool Loading { get; set; }
     [Parameter] public EventCallback OnLoadOlder { get; set; }
+    // Báo trang cha những tin ĐANG NẰM TRONG VÙNG NHÌN THẤY (khi tab đang hoạt động), để chỉ báo "đã xem" cho các tin đó
+    [Parameter] public EventCallback<IReadOnlyList<Guid>> OnSeen { get; set; }
     private ElementReference _element;
     private IJSObjectReference? _module;
+    private IJSObjectReference? _tracker;
     private DotNetObjectReference<MessageList>? _reference;
     private bool _disposed;
     private bool _requestingOlder;
@@ -32,6 +52,23 @@
             _reference = DotNetObjectReference.Create(this);
         }
         await _module.InvokeVoidAsync("bind", _element, _reference, ConversationId.ToString(), HasOlder && !Loading, Items.Count);
+
+        if (_tracker is null)
+        {
+            var tracker = await JS.InvokeAsync<IJSObjectReference>("import", "./js/read-tracker.js");
+            if (_disposed) { await tracker.DisposeAsync(); return; }
+            _tracker = tracker;
+            await _tracker.InvokeVoidAsync("bind", _element, _reference);
+        }
+        // Mỗi lần vẽ lại (tin mới, tin cũ vừa tải) kiểm tra xem có tin nào vừa lọt vào vùng nhìn thấy không
+        await _tracker.InvokeVoidAsync("check", _element);
+    }
+
+    [JSInvokable]
+    public async Task MessagesSeen(Guid[] ids)
+    {
+        if (_disposed || ids.Length == 0) return;
+        await OnSeen.InvokeAsync(ids);
     }
     [JSInvokable]
     public async Task LoadOlderFromScroll()
@@ -50,11 +87,23 @@
             catch (JSDisconnectedException) { }
             await _module.DisposeAsync();
         }
+        if (_tracker is not null)
+        {
+            try { await _tracker.InvokeVoidAsync("unbind", _element); }
+            catch (JSDisconnectedException) { }
+            await _tracker.DisposeAsync();
+        }
         _reference?.Dispose();
     }
 
     [Parameter] public IReadOnlyList<MessageResponse> Items { get; set; } = [];
     [Parameter] public Guid CurrentUserId { get; set; }
+
+    // Chữ trạng thái dưới tin của mình ("Đã gửi", "Đã nhận", "Đã xem", "B, C đã xem"); trả null thì không hiện gì
+    [Parameter] public Func<MessageResponse, string?>? StatusFor { get; set; }
+
+    // Tệp đính kèm theo mã tin (rỗng hoặc thiếu nghĩa là tin chỉ có chữ)
+    [Parameter] public IReadOnlyDictionary<Guid, IReadOnlyList<AttachmentDto>>? Attachments { get; set; }
 
     // Tên người gửi theo mã người dùng (dùng cho chat nhóm, nơi có nhiều người gửi)
     [Parameter] public IReadOnlyDictionary<Guid, string>? SenderNames { get; set; }

@@ -1,0 +1,63 @@
+@implements IDisposable
+@inject ProfileCache Profiles
+@inject ApiRequestSender Api
+@using global::Chat.Client.Services
+
+@* Ảnh đại diện của một người. Có ảnh thì hiện ảnh, chưa có (hoặc chưa tải được) thì hiện chữ cái đầu của tên. *@
+@if (_src is not null)
+{
+    <img class="avatar @SizeClass avatar-img" src="@_src" alt="@DisplayName" />
+}
+else
+{
+    <span class="avatar @SizeClass" aria-label="@DisplayName">@AvatarText.From(DisplayName)</span>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public Guid UserId { get; set; }
+
+    [Parameter]
+    public string DisplayName { get; set; } = "";
+
+    // "sm" (nhỏ, thanh điều hướng), "" (vừa) hoặc "lg" (lớn, trang hồ sơ)
+    [Parameter]
+    public string Size { get; set; } = "";
+
+    private string? _src;
+    private Guid _loadedFor;
+
+    private string SizeClass => Size == "" ? "" : $"avatar-{Size}";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // Chỉ hỏi lại khi đổi sang người khác; đổi ảnh được báo qua sự kiện Changed bên dưới
+        if (UserId == _loadedFor)
+            return;
+
+        Profiles.Changed -= OnProfileChanged;
+        _loadedFor = UserId;
+        Profiles.Changed += OnProfileChanged;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _src = null;
+
+        if (UserId == Guid.Empty)
+            return;
+
+        var profile = await Profiles.GetAsync(UserId);
+        if (profile?.AvatarUrl is { Length: > 0 } url)
+            _src = Api.ToAbsoluteUri(url) + "?v=" + Profiles.VersionOf(UserId);
+    }
+
+    private void OnProfileChanged(Guid changed)
+    {
+        if (changed == UserId)
+            _ = InvokeAsync(async () => { await LoadAsync(); StateHasChanged(); });
+    }
+
+    public void Dispose() => Profiles.Changed -= OnProfileChanged;
+}
