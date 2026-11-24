@@ -24,5 +24,10 @@
     <Compile Include="../../../frontend/Services/MessagesApiClient.cs" Link="Services/MessagesApiClient.cs" />
     <Compile Include="../../../frontend/Services/ConversationsApiClient.cs" Link="Services/ConversationsApiClient.cs" />
     <Compile Include="../../../frontend/Services/ConversationDiscovery.cs" Link="Services/ConversationDiscovery.cs" />
+    <Compile Include="../../../frontend/Models/AttachmentModels.cs" Link="Models/AttachmentModels.cs" />
+    <Compile Include="../../../frontend/Models/ReceiptModels.cs" Link="Models/ReceiptModels.cs" />
+    <Compile Include="../../../frontend/Services/IMessageReceiptApiClient.cs" Link="Services/IMessageReceiptApiClient.cs" />
+    <Compile Include="../../../frontend/State/ConversationExtras.cs" Link="State/ConversationExtras.cs" />
+    <Compile Include="../../../frontend/State/ReceiptCoordinator.cs" Link="State/ReceiptCoordinator.cs" />
   </ItemGroup>
 </Project>

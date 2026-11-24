@@ -141,9 +141,9 @@ public sealed class ReceiptCoordinator(ChatSession session, IMessageReceiptApiCl
 
         // Nhóm: báo từng tin của người khác mà mình chưa báo (tin đã "xem" thì đã tính là "nhận")
         ForgetHidden(x, state.Messages);
-        foreach (var m in Pending(x, messages, myId, x.DeliveredMessages, x.ReadMessages))
+        foreach (var m in Pending(x, messages, myId, x.DeliveredInFlight, x.DeliveredMessages, x.ReadMessages))
         {
-            var result = await TryConfirmAsync(x, m.Id, () => api.MarkDeliveredAsync(conversationId, m.Seq));
+            var result = await TryConfirmAsync(x, x.DeliveredInFlight, m.Id, () => api.MarkDeliveredAsync(conversationId, m.Seq));
             if (result == Confirm.Done) x.DeliveredMessages.Add(m.Id);
             else if (result == Confirm.Failed) break; // lỗi mạng: dừng, lần sau báo tiếp
         }
@@ -173,9 +173,9 @@ public sealed class ReceiptCoordinator(ChatSession session, IMessageReceiptApiCl
             return;
         }
 
-        foreach (var m in Pending(x, messages, myId, x.ReadMessages))
+        foreach (var m in Pending(x, messages, myId, x.ReadInFlight, x.ReadMessages))
         {
-            var result = await TryConfirmAsync(x, m.Id, () => api.MarkReadAsync(conversationId, m.Seq));
+            var result = await TryConfirmAsync(x, x.ReadInFlight, m.Id, () => api.MarkReadAsync(conversationId, m.Seq));
             if (result == Confirm.Done)
             {
                 x.ReadMessages.Add(m.Id);
@@ -238,13 +238,13 @@ public sealed class ReceiptCoordinator(ChatSession session, IMessageReceiptApiCl
 
     // Các tin của NGƯỜI KHÁC mà mình chưa báo (mới nhất trước, có giới hạn), theo thứ tự seq tăng dần để báo.
     // Bỏ qua tin đang được báo dở và tin vừa bị 403/404 (đang chờ thử lại).
-    private static List<MessageResponse> Pending(ConversationExtras x, IReadOnlyCollection<MessageResponse> messages, Guid myId, params HashSet<Guid>[] done)
+    private static List<MessageResponse> Pending(ConversationExtras x, IReadOnlyCollection<MessageResponse> messages, Guid myId, HashSet<Guid> inFlight, params HashSet<Guid>[] done)
     {
         var now = DateTimeOffset.UtcNow;
         return messages
             .Where(m => m.SenderUserId != myId
                         && !done.Any(d => d.Contains(m.Id))
-                        && !x.ReceiptsInFlight.Contains(m.Id)
+                        && !inFlight.Contains(m.Id)
                         && !(x.ReceiptsRetryAfter.TryGetValue(m.Id, out var after) && after > now))
             .OrderByDescending(m => m.Seq)
             .Take(MaxConfirmPerPass)
@@ -257,9 +257,9 @@ public sealed class ReceiptCoordinator(ChatSession session, IMessageReceiptApiCl
     //  - 403/404 (tin đang bị ẩn do chặn, hoặc không còn): KHÔNG coi là đã xác nhận. Chờ một lúc rồi thử lại; khi tin hiện lại
     //    và đủ điều kiện thì lần sau sẽ gửi được. Trả Skipped để lượt này sang tin kế tiếp.
     //  - Lỗi khác (mạng, máy chủ): Failed để dừng lượt này.
-    private static async Task<Confirm> TryConfirmAsync(ConversationExtras x, Guid messageId, Func<Task<ReceiptDto>> call)
+    private static async Task<Confirm> TryConfirmAsync(ConversationExtras x, HashSet<Guid> inFlight, Guid messageId, Func<Task<ReceiptDto>> call)
     {
-        if (!x.ReceiptsInFlight.Add(messageId)) return Confirm.Skipped;
+        if (!inFlight.Add(messageId)) return Confirm.Skipped;
 
         try
         {
@@ -278,7 +278,7 @@ public sealed class ReceiptCoordinator(ChatSession session, IMessageReceiptApiCl
         }
         finally
         {
-            x.ReceiptsInFlight.Remove(messageId);
+            inFlight.Remove(messageId);
         }
     }
 

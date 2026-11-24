@@ -8,6 +8,50 @@ namespace Chat.Client.Tests;
 public sealed class ChatSessionTests
 {
     [Fact]
+    public async Task GroupReadIsSentWhenDeliveredRequestIsStillPending()
+    {
+        var messages = new FakeMessages();
+        messages.Add(1);
+        var session = new ChatSession(messages);
+        var api = new DelayedDeliveryReceiptApi();
+        var coordinator = new ReceiptCoordinator(session, api);
+        var userId = Guid.NewGuid();
+        var batch = messages.Items.ToList();
+
+        var delivering = coordinator.MarkDeliveredAsync(messages.Id, true, userId, batch);
+        try
+        {
+            Assert.False(delivering.IsCompleted);
+            await coordinator.MarkReadAsync(messages.Id, true, userId, batch);
+            await coordinator.MarkReadAsync(messages.Id, true, userId, batch);
+            Assert.Equal(batch[0].Seq, Assert.Single(api.ReadSequences));
+        }
+        finally
+        {
+            api.Delivered.SetResult(new ReceiptDto());
+            await delivering;
+        }
+    }
+
+    private sealed class DelayedDeliveryReceiptApi : IMessageReceiptApiClient
+    {
+        public TaskCompletionSource<ReceiptDto> Delivered { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public List<long> ReadSequences { get; } = [];
+
+        public Task<ConversationReceiptsDto> GetAsync(Guid conversationId, IReadOnlyCollection<Guid>? messageIds = null) =>
+            throw new NotSupportedException();
+
+        public Task<ReceiptDto> MarkDeliveredAsync(Guid conversationId, long seq) => Delivered.Task;
+
+        public Task<ReceiptDto> MarkReadAsync(Guid conversationId, long seq)
+        {
+            ReadSequences.Add(seq);
+            return Task.FromResult(new ReceiptDto());
+        }
+    }
+
+    [Fact]
     public async Task InitialLoadShowsLatestTwentyAndOlderLoadsBackward()
     {
         var api = new FakeMessages();

@@ -34,7 +34,7 @@
     [Parameter] public bool Loading { get; set; }
     [Parameter] public EventCallback OnLoadOlder { get; set; }
     // Báo trang cha những tin ĐANG NẰM TRONG VÙNG NHÌN THẤY (khi tab đang hoạt động), để chỉ báo "đã xem" cho các tin đó
-    [Parameter] public EventCallback<IReadOnlyList<Guid>> OnSeen { get; set; }
+    [Parameter] public Func<IReadOnlyList<Guid>, Task>? OnSeen { get; set; }
     private ElementReference _element;
     private IJSObjectReference? _module;
     private IJSObjectReference? _tracker;
@@ -67,8 +67,8 @@
     [JSInvokable]
     public async Task MessagesSeen(Guid[] ids)
     {
-        if (_disposed || ids.Length == 0) return;
-        await OnSeen.InvokeAsync(ids);
+        if (_disposed || ids.Length == 0 || OnSeen is null) return;
+        await OnSeen(ids);
     }
     [JSInvokable]
     public async Task LoadOlderFromScroll()

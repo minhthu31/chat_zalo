@@ -37,7 +37,8 @@ public sealed class ConversationExtras
     public HashSet<Guid> ReceiptsChecked { get; } = [];
     // Tin đang được gửi xác nhận (tránh gửi trùng khi vừa cuộn vừa tải) và tin vừa bị 403/404 (chờ một lúc rồi mới thử lại,
     // KHÔNG coi là đã xác nhận: khi tin đủ điều kiện hiện lại thì vẫn gửi được)
-    public HashSet<Guid> ReceiptsInFlight { get; } = [];
+    public HashSet<Guid> DeliveredInFlight { get; } = [];
+    public HashSet<Guid> ReadInFlight { get; } = [];
     public Dictionary<Guid, DateTimeOffset> ReceiptsRetryAfter { get; } = [];
     public bool LoadingReceipts { get; set; }
 }
