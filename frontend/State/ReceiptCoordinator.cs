@@ -49,6 +49,8 @@ public sealed class ReceiptCoordinator(ChatSession session, IMessageReceiptApiCl
         var x = state.Extras();
         if (x.LoadingReceipts) return;
 
+        ForgetHidden(x, state.Messages);
+
         var now = DateTimeOffset.UtcNow;
         var missing = state.Messages
             .Where(m => !x.ReceiptsChecked.Contains(m.Id)
@@ -138,6 +140,7 @@ public sealed class ReceiptCoordinator(ChatSession session, IMessageReceiptApiCl
         }
 
         // Nhóm: báo từng tin của người khác mà mình chưa báo (tin đã "xem" thì đã tính là "nhận")
+        ForgetHidden(x, state.Messages);
         foreach (var m in Pending(x, messages, myId, x.DeliveredMessages, x.ReadMessages))
         {
             var result = await TryConfirmAsync(x, m.Id, () => api.MarkDeliveredAsync(conversationId, m.Seq));
@@ -217,6 +220,18 @@ public sealed class ReceiptCoordinator(ChatSession session, IMessageReceiptApiCl
 
         if (others.Any(r => r.ReadSeq >= message.Seq)) return "Đã xem";
         return others.Any(r => r.DeliveredSeq >= message.Seq) ? "Đã nhận" : "Đã gửi";
+    }
+
+    // Tin KHÔNG còn trong danh sách đang hiển thị (bị ẩn do chặn...) thì quên thời gian chờ thử lại và việc "đã hỏi receipts" của nó.
+    // Nhờ vậy khi tin hiện lại sau khi bỏ chặn, FE hỏi lại trạng thái và gửi xác nhận lại ngay, không phải chờ hết thời gian cũ.
+    private static void ForgetHidden(ConversationExtras x, IReadOnlyList<MessageResponse> loaded)
+    {
+        if (x.ReceiptsRetryAfter.Count == 0 && x.ReceiptsChecked.Count == 0) return;
+
+        var present = loaded.Select(m => m.Id).ToHashSet();
+        foreach (var id in x.ReceiptsRetryAfter.Keys.Where(k => !present.Contains(k)).ToList())
+            x.ReceiptsRetryAfter.Remove(id);
+        x.ReceiptsChecked.RemoveWhere(id => !present.Contains(id));
     }
 
     private enum Confirm { Done, Skipped, Failed }
