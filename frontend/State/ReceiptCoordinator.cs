@@ -10,10 +10,12 @@ namespace Chat.Client.State;
 // Hai cách tính theo hợp đồng CHAT-28:
 //  - Chat cá nhân: dùng MỐC (seq) "đã nhận tới tin số..", "đã xem tới tin số.." và mốc chỉ tăng.
 //  - Chat nhóm: xác nhận TỪNG TIN (PUT seq = đúng một tin), vì người ở trong nhóm có thể bị chặn nên không thấy một số tin.
+//    "Đã nhận" gửi khi tải được tin về; "Đã xem" CHỈ gửi cho tin đang nằm trong vùng nhìn thấy khi trang đang hoạt động.
 public sealed class ReceiptCoordinator(ChatSession session, IMessageReceiptApiClient api)
 {
     private const int PageIds = 100;          // hợp đồng: GET receipts nhận tối đa 100 mã tin
     private const int MaxConfirmPerPass = 30; // mỗi lượt chỉ báo tối đa chừng này tin (tránh bắn quá nhiều yêu cầu một lúc)
+    private static readonly TimeSpan RetryDelay = TimeSpan.FromSeconds(20); // tin vừa bị 403/404: chờ chừng này rồi mới thử lại
 
     // Tải trạng thái. Lỗi thì bỏ qua: trạng thái chỉ là phụ, tin nhắn vẫn dùng bình thường.
     // Nhóm: kèm mã các tin đang có để lấy trạng thái từng tin.
@@ -32,29 +34,51 @@ public sealed class ReceiptCoordinator(ChatSession session, IMessageReceiptApiCl
             }
 
             var result = await api.GetAsync(conversationId, ids);
+            Absorb(x, result, myId);
+        }
+        catch (ApiException)
+        {
+        }
+    }
 
-            // Người đã rời nhóm không còn trong danh sách: bỏ họ khỏi những người được tính là đã nhận/đã xem
-            var current = result.Items.Select(i => i.UserId).ToHashSet();
-            foreach (var gone in x.Receipts.Keys.Where(k => !current.Contains(k)).ToList())
-                x.Receipts.Remove(gone);
+    // Nhóm: hỏi trạng thái của những tin MỚI VỀ máy mà chưa hỏi (vd trang tin cũ vừa cuộn lên, tin hiện lại sau khi bỏ chặn).
+    // Mỗi lần chỉ gửi mã của các tin đó (tối đa 100 mã một yêu cầu), không hỏi lại tin đã biết.
+    public async Task LoadMissingAsync(Guid conversationId, Guid myId)
+    {
+        var state = session.State.For(conversationId);
+        var x = state.Extras();
+        if (x.LoadingReceipts) return;
 
-            foreach (var item in result.Items)
-                Upsert(x, item);
+        var now = DateTimeOffset.UtcNow;
+        var missing = state.Messages
+            .Where(m => !x.ReceiptsChecked.Contains(m.Id)
+                        && !(x.ReceiptsRetryAfter.TryGetValue(m.Id, out var after) && after > now))
+            .OrderByDescending(m => m.Seq)
+            .Select(m => m.Id)
+            .ToList();
+        if (missing.Count == 0) return;
 
-            foreach (var m in result.Messages)
+        x.LoadingReceipts = true;
+        try
+        {
+            foreach (var batch in missing.Chunk(PageIds))
             {
-                x.MessageReceipts[m.MessageId] = m;
-                // Mình đã báo tin này rồi (từ lần trước hoặc thiết bị khác) thì khỏi báo lại
-                if (m.DeliveredByUserIds.Contains(myId)) x.DeliveredMessages.Add(m.MessageId);
-                if (m.ReadByUserIds.Contains(myId))
-                {
-                    x.ReadMessages.Add(m.MessageId);
-                    x.DeliveredMessages.Add(m.MessageId);
-                }
+                var result = await api.GetAsync(conversationId, batch);
+                Absorb(x, result, myId);
+
+                // Tin không được trả về (đang bị ẩn do chặn...): chưa coi là đã biết, thử lại sau một lúc
+                var returned = result.Messages.Select(m => m.MessageId).ToHashSet();
+                foreach (var id in batch.Where(id => !returned.Contains(id)))
+                    x.ReceiptsRetryAfter[id] = now + RetryDelay;
             }
         }
         catch (ApiException)
         {
+            // Lỗi mạng: lần đồng bộ sau sẽ hỏi lại
+        }
+        finally
+        {
+            x.LoadingReceipts = false;
         }
     }
 
@@ -114,15 +138,16 @@ public sealed class ReceiptCoordinator(ChatSession session, IMessageReceiptApiCl
         }
 
         // Nhóm: báo từng tin của người khác mà mình chưa báo (tin đã "xem" thì đã tính là "nhận")
-        foreach (var m in Pending(messages, myId, x.DeliveredMessages, x.ReadMessages))
+        foreach (var m in Pending(x, messages, myId, x.DeliveredMessages, x.ReadMessages))
         {
-            if (await TryConfirmAsync(() => api.MarkDeliveredAsync(conversationId, m.Seq), m.Id, x.DeliveredMessages))
-                continue;
-            break; // lỗi mạng: dừng, lần sau báo tiếp
+            var result = await TryConfirmAsync(x, m.Id, () => api.MarkDeliveredAsync(conversationId, m.Seq));
+            if (result == Confirm.Done) x.DeliveredMessages.Add(m.Id);
+            else if (result == Confirm.Failed) break; // lỗi mạng: dừng, lần sau báo tiếp
         }
     }
 
-    // Người dùng ĐANG MỞ hội thoại và đã đọc các tin này
+    // Người dùng đã THẤY các tin này. Chat cá nhân: báo mốc tới tin lớn nhất trong danh sách (trang gọi khi đang mở và đang nhìn).
+    // Chat nhóm: messages PHẢI là các tin đang nằm trong vùng nhìn thấy (trang đang hoạt động); chỉ những tin đó được báo "đã xem".
     public async Task MarkReadAsync(Guid conversationId, bool isGroup, Guid myId, IReadOnlyCollection<MessageResponse> messages)
     {
         var state = session.State.For(conversationId);
@@ -145,11 +170,15 @@ public sealed class ReceiptCoordinator(ChatSession session, IMessageReceiptApiCl
             return;
         }
 
-        foreach (var m in Pending(messages, myId, x.ReadMessages))
+        foreach (var m in Pending(x, messages, myId, x.ReadMessages))
         {
-            var ok = await TryConfirmAsync(() => api.MarkReadAsync(conversationId, m.Seq), m.Id, x.ReadMessages);
-            if (ok) x.DeliveredMessages.Add(m.Id); // xác nhận "xem" cũng ghi "nhận"
-            else break;
+            var result = await TryConfirmAsync(x, m.Id, () => api.MarkReadAsync(conversationId, m.Seq));
+            if (result == Confirm.Done)
+            {
+                x.ReadMessages.Add(m.Id);
+                x.DeliveredMessages.Add(m.Id); // xác nhận "xem" cũng ghi "nhận"
+            }
+            else if (result == Confirm.Failed) break;
         }
     }
 
@@ -190,31 +219,84 @@ public sealed class ReceiptCoordinator(ChatSession session, IMessageReceiptApiCl
         return others.Any(r => r.DeliveredSeq >= message.Seq) ? "Đã nhận" : "Đã gửi";
     }
 
-    // Các tin của NGƯỜI KHÁC mà mình chưa báo (mới nhất trước, có giới hạn), theo thứ tự seq tăng dần để báo
-    private static List<MessageResponse> Pending(IReadOnlyCollection<MessageResponse> messages, Guid myId, params HashSet<Guid>[] done) =>
-        messages.Where(m => m.SenderUserId != myId && !done.Any(d => d.Contains(m.Id)))
-                .OrderByDescending(m => m.Seq)
-                .Take(MaxConfirmPerPass)
-                .OrderBy(m => m.Seq)
-                .ToList();
+    private enum Confirm { Done, Skipped, Failed }
 
-    // Báo một tin. 403 (tin đang bị ẩn do chặn...) thì ghi nhớ để khỏi thử lại; lỗi khác (mạng) thì trả false để dừng.
-    private static async Task<bool> TryConfirmAsync(Func<Task<ReceiptDto>> call, Guid messageId, HashSet<Guid> done)
+    // Các tin của NGƯỜI KHÁC mà mình chưa báo (mới nhất trước, có giới hạn), theo thứ tự seq tăng dần để báo.
+    // Bỏ qua tin đang được báo dở và tin vừa bị 403/404 (đang chờ thử lại).
+    private static List<MessageResponse> Pending(ConversationExtras x, IReadOnlyCollection<MessageResponse> messages, Guid myId, params HashSet<Guid>[] done)
     {
+        var now = DateTimeOffset.UtcNow;
+        return messages
+            .Where(m => m.SenderUserId != myId
+                        && !done.Any(d => d.Contains(m.Id))
+                        && !x.ReceiptsInFlight.Contains(m.Id)
+                        && !(x.ReceiptsRetryAfter.TryGetValue(m.Id, out var after) && after > now))
+            .OrderByDescending(m => m.Seq)
+            .Take(MaxConfirmPerPass)
+            .OrderBy(m => m.Seq)
+            .ToList();
+    }
+
+    // Báo một tin.
+    //  - Thành công: Done.
+    //  - 403/404 (tin đang bị ẩn do chặn, hoặc không còn): KHÔNG coi là đã xác nhận. Chờ một lúc rồi thử lại; khi tin hiện lại
+    //    và đủ điều kiện thì lần sau sẽ gửi được. Trả Skipped để lượt này sang tin kế tiếp.
+    //  - Lỗi khác (mạng, máy chủ): Failed để dừng lượt này.
+    private static async Task<Confirm> TryConfirmAsync(ConversationExtras x, Guid messageId, Func<Task<ReceiptDto>> call)
+    {
+        if (!x.ReceiptsInFlight.Add(messageId)) return Confirm.Skipped;
+
         try
         {
             await call();
-            done.Add(messageId);
-            return true;
+            x.ReceiptsRetryAfter.Remove(messageId);
+            return Confirm.Done;
         }
         catch (ApiException ex) when (ex.StatusCode is 403 or 404)
         {
-            done.Add(messageId);
-            return true;
+            x.ReceiptsRetryAfter[messageId] = DateTimeOffset.UtcNow + RetryDelay;
+            return Confirm.Skipped;
         }
         catch (ApiException)
         {
-            return false;
+            return Confirm.Failed;
+        }
+        finally
+        {
+            x.ReceiptsInFlight.Remove(messageId);
+        }
+    }
+
+    // Gộp kết quả GET receipts vào trạng thái (cả mốc từng người lẫn trạng thái từng tin)
+    private static void Absorb(ConversationExtras x, ConversationReceiptsDto result, Guid myId)
+    {
+        // Người đã rời nhóm không còn trong danh sách: bỏ họ khỏi những người được tính là đã nhận/đã xem
+        var current = result.Items.Select(i => i.UserId).ToHashSet();
+        foreach (var gone in x.Receipts.Keys.Where(k => !current.Contains(k)).ToList())
+            x.Receipts.Remove(gone);
+
+        foreach (var item in result.Items)
+            Upsert(x, item);
+
+        foreach (var m in result.Messages)
+        {
+            // Gộp (hợp) với những gì đã nhận qua sự kiện, để không mất thông tin đến trước phản hồi này
+            var entry = GetOrAddMessage(x, m.MessageId, m.Seq);
+            entry.Seq = m.Seq;
+            entry.SenderUserId = m.SenderUserId;
+            foreach (var id in m.DeliveredByUserIds) AddOnce(entry.DeliveredByUserIds, id);
+            foreach (var id in m.ReadByUserIds) AddOnce(entry.ReadByUserIds, id);
+
+            x.ReceiptsChecked.Add(m.MessageId);
+            x.ReceiptsRetryAfter.Remove(m.MessageId);
+
+            // Mình đã báo tin này rồi (từ lần trước hoặc thiết bị khác) thì khỏi báo lại
+            if (m.DeliveredByUserIds.Contains(myId)) x.DeliveredMessages.Add(m.MessageId);
+            if (m.ReadByUserIds.Contains(myId))
+            {
+                x.ReadMessages.Add(m.MessageId);
+                x.DeliveredMessages.Add(m.MessageId);
+            }
         }
     }
 
