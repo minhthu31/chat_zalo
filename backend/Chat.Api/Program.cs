@@ -1,3 +1,8 @@
+using System.Threading.RateLimiting;
+using Chat.Api.Services;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.HttpOverrides;
+using System.Net;
 using Chat.Api.Controllers;
 using Chat.Api.Authorization;
 using Chat.Application.DTOs.Auth;
@@ -26,7 +31,17 @@ var connectionString = builder.Configuration.GetConnectionString("DefaultConnect
 builder.Services.AddDbContext<ChatDbContext>(options =>
     options.UseNpgsql(connectionString));
 
-builder.Services.AddDataProtection();
+var dataProtection = builder.Services.AddDataProtection();
+var keyPath = configuration["DataProtection:KeyPath"];
+if (!string.IsNullOrWhiteSpace(keyPath))
+    dataProtection.PersistKeysToFileSystem(new DirectoryInfo(keyPath));
+
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    foreach (var address in configuration.GetSection("ReverseProxy:KnownProxies").Get<string[]>() ?? [])
+        options.KnownProxies.Add(IPAddress.Parse(address));
+});
 
 builder.Services.AddIdentityCore<ApplicationUser>(options =>
 {
@@ -155,6 +170,20 @@ builder.Services.AddScoped<IUserAccountGateway, IdentityUserAccountGateway>();
 builder.Services.AddScoped<IMessageService, Chat.Infrastructure.Services.MessageService>();
 builder.Services.AddScoped<IGroupService, Chat.Infrastructure.Services.GroupService>();
 
+builder.Services.AddSingleton<PasswordRecovery>();
+builder.Services.AddHostedService(services => services.GetRequiredService<PasswordRecovery>());
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddPolicy("password-recovery", context => RateLimitPartition.GetFixedWindowLimiter(
+        context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 30,
+            Window = TimeSpan.FromMinutes(5)
+        }));
+});
+
 builder.Services.AddControllers();
 
 builder.Services.Configure<Microsoft.AspNetCore.Mvc.ApiBehaviorOptions>(options =>
@@ -188,6 +217,7 @@ builder.Services.AddSignalR(options =>
 
 // Đăng ký DI bắt buộc cho CHAT-8
 builder.Services.AddSingleton<IChatConnectionTracker, ChatConnectionTracker>();
+builder.Services.AddMemoryCache();
 builder.Services.AddScoped<ChatNotificationService>();
 builder.Services.AddScoped<IChatNotificationService>(services =>
     services.GetRequiredService<ChatNotificationService>());
@@ -233,8 +263,12 @@ if (configuration.GetValue<bool>("cleanup-pending"))
     return;
 }
 
+app.UseForwardedHeaders();
+app.UseRouting();
+
 // Middleware order: CORS -> Authentication -> Authorization
 app.UseCors("Frontend");
+app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 

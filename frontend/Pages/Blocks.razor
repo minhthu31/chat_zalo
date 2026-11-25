@@ -2,9 +2,10 @@
 @using global::Chat.Client.Services
 @using global::Chat.Client.Components.Auth
 @inject IBlockApiClient Api
-<PageTitle>Người đã chặn · chat_zalo</PageTitle>
-<div class="as-root"><div class="page"><UserBar /><section class="card">
-<h1>Người đã chặn</h1><button class="btn btn-sm" disabled="@busy" @onclick="Load">Tải lại</button>
+@inject IUserApiClient Users
+@if (!Embedded) { <PageTitle>Người đã chặn · chat_zalo</PageTitle> }
+<div class="as-root"><div class="page">@if (!Embedded) { <UserBar /> }<section class="card">
+@if (!Embedded) { <h1>Người đã chặn</h1> }@if (!Embedded) { <button class="btn btn-sm" disabled="@busy" @onclick="Load">Tải lại</button> }
 @if (error is not null) { <p class="alert alert-error" role="alert">@error</p> }
 @if (loading) { <p role="status">Đang tải…</p> }
 else if (users.Count == 0 && error is null) { <p>Chưa chặn người dùng nào.</p> }
@@ -12,11 +13,37 @@ else if (users.Count == 0 && error is null) { <p>Chưa chặn người dùng nà
     <div class="list-item" @key="user.UserId"><span>@(string.IsNullOrWhiteSpace(user.DisplayName) ? user.Username : user.DisplayName) <small>@@@user.Username</small></span>
     <button class="btn btn-sm" disabled="@busy" @onclick="() => Unblock(user.UserId)">Bỏ chặn</button></div>
 }
+<form class="search-row" @onsubmit="BlockByUsername" @onsubmit:preventDefault>
+    <input aria-label="Tên đăng nhập muốn chặn" placeholder="Nhập tên đăng nhập muốn chặn…" @bind="username" />
+    <button type="submit" class="btn btn-primary btn-sm" disabled="@(busy || loading)">Chặn</button>
+</form>
 </section></div></div>
 @code {
+    [Parameter] public bool Embedded { get; set; }
     private List<BlockedUserDto> users = [];
     private bool loading = true, busy;
     private string? error;
+    private string username = "";
+
+    private async Task BlockByUsername()
+    {
+        var name = username.Trim();
+        if (busy || name.Length == 0) return;
+        busy = true;
+        error = null;
+        try
+        {
+            var matches = await Users.SearchAsync(name);
+            var user = matches.FirstOrDefault(u => string.Equals(u.Username, name, StringComparison.OrdinalIgnoreCase));
+            if (user is null) { error = "Không tìm thấy tên đăng nhập này."; return; }
+            await Api.BlockAsync(user.Id);
+            username = "";
+            await Load();
+        }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { busy = false; }
+    }
+
     protected override Task OnInitializedAsync() => Load();
     private async Task Load() {
         loading = true; error = null;

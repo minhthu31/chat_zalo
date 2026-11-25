@@ -1,20 +1,84 @@
 @using global::Chat.Client.Models
+@using global::Chat.Client.Services
+@using global::Chat.Client.Components.Shared
+@inject ApiRequestSender Api
 <nav aria-label="Hội thoại">
     @if (Items.Count == 0) { <p>Chưa có hội thoại.</p> }
     @foreach (var item in Items)
     {
         <button type="button" class="conversation @(item.Id == Selected ? "active" : "")"
                 disabled="@Disabled" @onclick="() => OnSelect.InvokeAsync(item.Id)">
-            @(Titles.TryGetValue(item.Id, out var title) ? title : DefaultTitle(item)) <small>@KindLabel(item)</small>
+            @{ var title = Titles.TryGetValue(item.Id, out var name) && !string.IsNullOrWhiteSpace(name) ? name : DefaultTitle(item); }
+            @if (Peers.TryGetValue(item.Id, out var peer))
+            {
+                <UserAvatar UserId="peer.UserId" DisplayName="@title" Size="sm" ShowPresence="true" />
+            }
+            else
+            {
+                <span class="avatar avatar-sm" aria-hidden="true">@AvatarText.From(title)</span>
+            }
+            <span class="conversation-label">
+                <strong>@title</strong>
+                <small title="@Preview(item)">@Preview(item)</small>
+                @if (peer is not null)
+                {
+                    <PresenceLabel UserId="peer.UserId" />
+                }
+            </span>
         </button>
     }
 </nav>
 @code {
     [Parameter] public IReadOnlyList<ConversationDto> Items { get; set; } = [];
     [Parameter] public IReadOnlyDictionary<Guid, string> Titles { get; set; } = new Dictionary<Guid, string>();
+    [Parameter] public IReadOnlyDictionary<Guid, ConversationTitleDto> Peers { get; set; } = new Dictionary<Guid, ConversationTitleDto>();
     [Parameter] public Guid Selected { get; set; }
     [Parameter] public bool Disabled { get; set; }
     [Parameter] public EventCallback<Guid> OnSelect { get; set; }
+
+    [Parameter] public Guid CurrentUserId { get; set; }
+
+    private readonly Dictionary<Guid, (long Seq, MessageResponse? Latest)> previews = [];
+    private readonly HashSet<Guid> loading = [];
+
+    protected override async Task OnParametersSetAsync()
+    {
+        foreach (var id in previews.Keys.Where(id => Items.All(c => c.Id != id)).ToArray())
+            previews.Remove(id);
+
+        var pending = Items.Where(c => c.LastMessageSeq > 0 &&
+            (!previews.TryGetValue(c.Id, out var entry) || entry.Seq != c.LastMessageSeq))
+            .Take(12).ToArray();
+        await Task.WhenAll(pending.Select(LoadPreviewAsync));
+    }
+
+    private async Task LoadPreviewAsync(ConversationDto conversation)
+    {
+        if (!loading.Add(conversation.Id)) return;
+        try
+        {
+            var messages = await Api.SendAsync<List<MessageResponse>>(HttpMethod.Get,
+                $"api/conversations/{conversation.Id}/messages?limit=1");
+            if (Items.Any(c => c.Id == conversation.Id && c.LastMessageSeq == conversation.LastMessageSeq))
+                previews[conversation.Id] = (conversation.LastMessageSeq, messages.MaxBy(m => m.Seq));
+        }
+        catch (ApiException ex)
+        {
+            if (ex.StatusCode is 403 or 404)
+                previews[conversation.Id] = (conversation.LastMessageSeq, null);
+        }
+        finally { loading.Remove(conversation.Id); }
+    }
+
+    private string Preview(ConversationDto conversation)
+    {
+        if (!previews.TryGetValue(conversation.Id, out var entry) ||
+            entry.Seq != conversation.LastMessageSeq || entry.Latest is not { } message)
+            return KindLabel(conversation);
+
+        var body = string.IsNullOrWhiteSpace(message.Body) ? "Tệp đính kèm" : message.Body;
+        return message.SenderUserId == CurrentUserId ? $"Bạn: {body}" : body;
+    }
 
     private static string KindLabel(ConversationDto item) => item.Kind == "Group" ? "Nhóm" : "Trò chuyện cá nhân";
     private static string DefaultTitle(ConversationDto item) => item.Kind == "Group" ? "Nhóm" : "Trò chuyện cá nhân";

@@ -1,5 +1,42 @@
 @inherits LayoutComponentBase
+@using global::Chat.Client.State
+@implements IDisposable
+@inject AuthState Auth
+@inject PresenceState Presence
 
 <main>
     @Body
 </main>
+
+@code {
+    private readonly PeriodicTimer _heartbeat = new(TimeSpan.FromSeconds(8));
+
+    protected override void OnInitialized()
+    {
+        Auth.OnChange += OnAuthChanged;
+        OnAuthChanged();
+        _ = RunHeartbeatAsync();
+    }
+
+    private void OnAuthChanged()
+    {
+        _ = InvokeAsync(async () =>
+        {
+            if (Presence.SetViewer(Auth.CurrentUser?.Id))
+                await Presence.RefreshAsync();
+        });
+    }
+
+    private async Task RunHeartbeatAsync()
+    {
+        while (await _heartbeat.WaitForNextTickAsync())
+            await InvokeAsync(Presence.RefreshAsync);
+    }
+
+    public void Dispose()
+    {
+        Auth.OnChange -= OnAuthChanged;
+        _heartbeat.Dispose();
+        Presence.SetViewer(null);
+    }
+}

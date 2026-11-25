@@ -10,6 +10,10 @@ builder.RootComponents.Add<App>("#app");
 builder.RootComponents.Add<HeadOutlet>("head::after");
 
 var apiBaseUrl = builder.Configuration["ApiBaseUrl"];
+if (apiBaseUrl == "/")
+{
+    apiBaseUrl = builder.HostEnvironment.BaseAddress;
+}
 
 if (!Uri.TryCreate(apiBaseUrl, UriKind.Absolute, out var apiUri) ||
     (apiUri.Scheme != Uri.UriSchemeHttp &&
@@ -31,6 +35,7 @@ builder.Services.AddScoped<IFriendshipApiClient, FriendshipApiClient>();
 builder.Services.AddScoped<IBlockApiClient, BlockApiClient>();
 builder.Services.AddScoped<IGroupApiClient, GroupApiClient>();
 builder.Services.AddScoped<AuthState>();
+builder.Services.AddScoped<PresenceState>();
 builder.Services.AddScoped<ChatApiClient>();
 builder.Services.AddTransient<ChatRealtimeClient>();
 

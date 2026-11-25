@@ -1,0 +1,47 @@
+(chat_app) {
+    encode gzip zstd
+    handle /api/* {
+        reverse_proxy api:8080
+    }
+    handle /hubs/* {
+        reverse_proxy api:8080
+    }
+    handle /health {
+        reverse_proxy api:8080
+    }
+    @refreshUi {
+        path /login /chat
+        not header_regexp Cookie (?:^|;\s*)chat_ui_version=forgot-2511(?:;|$)
+    }
+    header @refreshUi {
+        Clear-Site-Data "\"cache\""
+        +Set-Cookie "chat_ui_version=forgot-2511; Path=/; Max-Age=31536000; Secure; HttpOnly; SameSite=Lax"
+    }
+    @refreshRegister {
+        path /register
+        not header_regexp Cookie (?:^|;\s*)chat_register_ui=forgot-2511(?:;|$)
+    }
+    header @refreshRegister {
+        Clear-Site-Data "\"cache\""
+        +Set-Cookie "chat_register_ui=forgot-2511; Path=/; Max-Age=31536000; Secure; HttpOnly; SameSite=Lax"
+    }
+    @assets path /_framework/* /css/* /js/*
+    handle @assets {
+        header Cache-Control "no-cache"
+        root * /srv
+        file_server {
+            precompressed br gzip
+        }
+    }
+    handle {
+        root * /srv
+        try_files {path} /index.html
+        header /appsettings.json Cache-Control "no-store"
+        header Cache-Control "no-cache"
+        file_server
+    }
+}
+
+{$CHAT_DOMAIN} {
+    import chat_app
+}

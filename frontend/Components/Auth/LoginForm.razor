@@ -9,7 +9,7 @@
 
     <div class="field">
         <label for="usernameOrEmail">Tên đăng nhập hoặc email</label>
-        <InputText id="usernameOrEmail" @bind-Value="_model.UsernameOrEmail" />
+        <InputText id="usernameOrEmail" autocomplete="username" @bind-Value="_model.UsernameOrEmail" />
         <ValidationMessage For="() => _model.UsernameOrEmail" />
     </div>
 
@@ -17,7 +17,10 @@
         <label for="password">Mật khẩu</label>
         <InputText id="password" type="@(_showPassword ? "text" : "password")" autocomplete="current-password" @bind-Value="_model.Password" />
         <ValidationMessage For="() => _model.Password" />
-        <label class="show-pw"><input type="checkbox" @bind="_showPassword" /> Hiện mật khẩu</label>
+        <div class="login-options">
+            <label class="show-pw"><input type="checkbox" @bind="_showPassword" /> Hiện mật khẩu</label>
+            <a href="/forgot-password">Quên mật khẩu?</a>
+        </div>
     </div>
 
     @if (_error is not null)

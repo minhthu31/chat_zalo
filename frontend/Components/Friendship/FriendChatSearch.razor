@@ -6,14 +6,23 @@
 
 @* Tìm bạn bè đã kết bạn (Accepted) để mở chat. Tự tìm sau khi ngừng gõ, chia trang 10 người. *@
 <div class="friend-search">
-    <label for="friend-search-input">Tìm bạn bè để nhắn tin</label>
-    <input id="friend-search-input"
-           type="search"
-           maxlength="100"
-           autocomplete="off"
-           placeholder="Tên đăng nhập hoặc tên hiển thị"
-           value="@_keyword"
-           @oninput="OnInputAsync" />
+    <label for="friend-chat-choice">Bắt đầu với bạn bè</label>
+    <select id="friend-chat-choice" @bind="_selected" disabled="@(_loading || Disabled)">
+        <option value="">Chọn bạn bè</option>
+        @foreach (var friend in _items)
+        {
+            <option value="@friend.Id">@friend.DisplayName (@("@" + friend.Username))</option>
+        }
+    </select>
+    <button type="button" class="btn btn-primary btn-block" disabled="@(_selected is null || _loading || Disabled)" @onclick="OpenSelectedAsync">Mở trò chuyện</button>
+    @if (_totalPages > 1 || _keyword.Length > 0)
+    {
+        <details class="friend-filter" open="@(_keyword.Length > 0)">
+            <summary>Tìm trong bạn bè</summary>
+            <input aria-label="Tìm bạn bè" type="search" maxlength="100" autocomplete="off"
+                   placeholder="Tên đăng nhập hoặc tên hiển thị" value="@_keyword" @oninput="OnInputAsync" />
+        </details>
+    }
 
     @if (_error is not null)
     {
@@ -38,22 +47,6 @@
         </p>
     }
 
-    @if (_items.Count > 0)
-    {
-        @* Hộp kết quả có chiều cao tối đa và tự cuộn: danh sách bạn bè dài không được đẩy danh sách hội thoại xuống dưới *@
-        <div class="friend-results">
-            @foreach (var friend in _items)
-            {
-                <div class="friend-row" @key="friend.Id">
-                    <UserIdentity UserId="friend.Id" DisplayName="@friend.DisplayName" Username="@friend.Username" Size="sm" Link="false" />
-                    <button type="button" class="btn btn-primary btn-sm" disabled="@Disabled" @onclick="() => OnOpen.InvokeAsync(friend.Id)">
-                        Nhắn tin
-                    </button>
-                </div>
-            }
-        </div>
-    }
-
     @if (_totalPages > 1)
     {
         <div class="pager">
@@ -75,6 +68,10 @@
     // Khóa nút khi trang cha đang bận (đang mở hội thoại, đang đồng bộ)
     [Parameter]
     public bool Disabled { get; set; }
+
+    private Guid? _selected;
+
+    private Task OpenSelectedAsync() => _selected is Guid id ? OnOpen.InvokeAsync(id) : Task.CompletedTask;
 
     private string _keyword = "";
     private List<SearchFriendDto> _items = new();
@@ -123,6 +120,7 @@
                 return;
 
             _items = result.Items;
+            if (!_items.Any(friend => friend.Id == _selected)) _selected = null;
             _page = result.Page;
             _totalPages = result.TotalPages;
         }

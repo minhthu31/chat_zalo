@@ -7,10 +7,24 @@
     <button type="button"
             class="btn btn-sm mute-btn @(_muted ? "is-muted" : "")"
             disabled="@(_loading || _busy)"
+            aria-label="@(_muted ? "Bật thông báo" : "Tắt thông báo")"
             aria-pressed="@(_muted ? "true" : "false")"
             title="@(_muted ? "Bấm để bật lại thông báo cho hội thoại này" : "Bấm để tắt thông báo (âm thanh và banner) của hội thoại này")"
             @onclick="ToggleAsync">
-        @(_busy ? "Đang lưu..." : _muted ? "🔕 Đã tắt thông báo" : "🔔 Thông báo")
+        @if (IconOnly)
+        {
+            <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M18 8a6 6 0 0 0-12 0c0 7-3 8-3 9h18c0-1-3-2-3-9M10 21h4" />
+                @if (_muted)
+                {
+                    <path d="M3 3l18 18" />
+                }
+            </svg>
+        }
+        else
+        {
+            <span>@(_busy ? "Đang lưu..." : _muted ? "Bật thông báo" : "Tắt thông báo")</span>
+        }
     </button>
 
     @if (_error is not null)
@@ -22,6 +36,8 @@
 @code {
     [Parameter, EditorRequired]
     public Guid ConversationId { get; set; }
+
+    [Parameter] public bool IconOnly { get; set; }
 
     private bool _muted;
     private bool _loading = true;

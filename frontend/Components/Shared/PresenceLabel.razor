@@ -1,0 +1,18 @@
+@implements IDisposable
+@using global::Chat.Client.State
+@inject PresenceState Presence
+
+@if (Presence.Find(UserId)?.Label is { } label)
+{
+    <small class="muted presence-label">@label</small>
+}
+
+@code {
+    [Parameter, EditorRequired] public Guid UserId { get; set; }
+
+    protected override void OnInitialized() => Presence.Changed += OnPresenceChanged;
+
+    private void OnPresenceChanged() => _ = InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Presence.Changed -= OnPresenceChanged;
+}

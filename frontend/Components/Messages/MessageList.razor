@@ -1,6 +1,7 @@
 @implements IAsyncDisposable
 @inject IJSRuntime JS
 @using global::Chat.Client.Models
+@using global::Chat.Client.Components.Shared
 @using global::Chat.Client.Services
 <ul @ref="_element" class="messages" aria-label="Tin nhắn">
     @if (Items.Count == 0) { <li>Chưa có tin nhắn.</li> }
@@ -19,7 +20,13 @@
             previousDay = day;
         }
         <li @key="message.Id" data-message-id="@message.Id" class="@(message.SenderUserId == CurrentUserId ? "mine" : "")">
-            <strong>@SenderLabel(message)</strong>
+            <div class="message-sender">
+                @if (message.SenderUserId != CurrentUserId)
+                {
+                    <UserAvatar UserId="message.SenderUserId" DisplayName="@SenderLabel(message)" Size="sm" />
+                }
+                <strong>@SenderLabel(message)</strong>
+            </div>
             @* Tin chỉ có tệp có nội dung chữ rỗng: không vẽ đoạn chữ trống *@
             @if (!string.IsNullOrEmpty(message.Body)) { <p>@message.Body</p> }
             @if (Attachments is not null && Attachments.TryGetValue(message.Id, out var files)) { <AttachmentList Items="files" /> }
