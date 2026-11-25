@@ -1,0 +1,19 @@
+# Optional temporary public demo, separate from permanent server deployment.
+services:
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command:
+      - tunnel
+      - --no-autoupdate
+      - --url
+      - https://web:443
+      - --no-tls-verify
+      - --http-host-header
+      - localhost
+      - --origin-server-name
+      - localhost
+      - --protocol
+      - http2
+    depends_on: [web]
+    networks: [private]

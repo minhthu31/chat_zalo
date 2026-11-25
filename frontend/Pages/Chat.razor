@@ -1,4 +1,5 @@
 @page "/chat"
+@using global::Chat.Client.Components.Shared
 @using global::Chat.Client.Models
 @using global::Chat.Client.Services
 @using global::Chat.Client.State
@@ -44,33 +45,55 @@
                 @if (refreshing && conversations.Count == 0) { <p class="muted">Đang tải hội thoại…</p> }
                 else
                 {
-                    <ConversationList Items="conversations" Titles="conversationTitles" Selected="@(session.State.SelectedId ?? Guid.Empty)" OnSelect="SelectAsync" />
+                    <ConversationList Items="conversations" Titles="conversationTitles" Peers="conversationPeers" CurrentUserId="Auth.CurrentUser!.Id" Selected="@(session.State.SelectedId ?? Guid.Empty)" OnSelect="SelectAsync" />
                 }
             </aside>
             <main class="chat-main">
                 @if (session.State.SelectedId is Guid id && session.State.Active is { } active)
                 {
                     <div class="chat-topbar">
-                        <span class="avatar">@ConversationTitle(id)[..1].ToUpperInvariant()</span>
+                        @if (conversationPeers.TryGetValue(id, out var headerPeer))
+                        {
+                            <UserAvatar UserId="headerPeer.UserId" DisplayName="@ConversationTitle(id)" ShowPresence="true" />
+                        }
+                        else
+                        {
+                            <span class="avatar" aria-hidden="true">@AvatarText.From(ConversationTitle(id))</span>
+                        }
                         <div class="chat-topbar-title">
                             <h2>@ConversationTitle(id)</h2>
-                            <small class="muted">@(IsGroup(id) ? (membersFor == id ? $"Nhóm · {senderNames.Count} thành viên" : "Nhóm") : "Trò chuyện cá nhân")</small>
+                            @if (headerPeer is not null)
+                            {
+                                <PresenceLabel UserId="headerPeer.UserId" />
+                            }
+                            @if (IsGroup(id))
+                            {
+                                <small class="muted">@(membersFor == id ? $"Nhóm · {senderNames.Count} thành viên" : "Nhóm")</small>
+                            }
                         </div>
                         <details class="conversation-menu" @key="id">
                             <summary aria-label="Tùy chọn hội thoại">•••</summary>
                             <div class="conversation-menu-popup">
                                 @if (IsGroup(id)) { <a class="btn btn-sm" href="/groups/@id">Xem nhóm</a> }
-                                <ConversationMuteButton ConversationId="id" />
-                                <button class="btn btn-sm" @onclick="RefreshAsync" disabled="@refreshing">Đồng bộ lại</button>
+                                @if (!conversationPeers.ContainsKey(id))
+                                {
+                                    <ConversationMuteButton ConversationId="id" />
+                                }
                                 @if (conversationPeers.TryGetValue(id, out var peer))
                                 {
-                                    <ConversationDetails Peer="peer" Revision="detailsRevision" OnChanged="RefreshFriendshipsAsync" CanSendChanged="value => sendPermissions[id] = value" />
+                                    <ConversationDetails Peer="peer" Revision="detailsRevision" OnChanged="RefreshFriendshipsAsync" CanSendChanged="value => sendPermissions[id] = value">
+                                        <ConversationMuteButton ConversationId="id" IconOnly="true" />
+                                    </ConversationDetails>
                                 }
+                                <button class="btn btn-sm" @onclick="RefreshAsync" disabled="@refreshing">Đồng bộ lại</button>
                             </div>
                         </details>
                     </div>
                     @if (active.Loading) { <p class="chat-loading" role="status">Đang tải tin nhắn…</p> }
-                    <button class="btn btn-sm older" @onclick="LoadOlderAsync" disabled="@(!active.HasOlder || active.Loading)">Tải tin nhắn cũ hơn</button>
+                    @if (active.HasOlder)
+                    {
+                        <button class="btn btn-sm older" @onclick="LoadOlderAsync" disabled="@active.Loading">Tải tin nhắn cũ hơn</button>
+                    }
                     <MessageList Items="active.Messages" CurrentUserId="Auth.CurrentUser!.Id"
                                  SenderNames="@(IsGroup(id) ? senderNames : null)"
                                  Attachments="active.Extras().Attachments"

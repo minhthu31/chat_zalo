@@ -2,10 +2,10 @@
 @using global::Chat.Client.Components.Auth
 @inject NavigationManager Nav
 
-<div class="as-root auth-center">
+<div class="as-root auth-center auth-entry auth-entry-register">
     <div class="page page-narrow">
         <div class="brand">
-            <div class="brand-logo">C</div>
+            <div class="auth-mark" aria-hidden="true"><span></span><span></span></div>
             <div class="brand-name">chat_zalo</div>
             <div class="brand-tagline">Tạo tài khoản để bắt đầu trò chuyện</div>
         </div>
@@ -15,7 +15,7 @@
 
             <RegisterForm OnSuccess="GoLogin" />
 
-            <p class="muted center">Đã có tài khoản? <a href="login">Đăng nhập</a></p>
+            <p class="muted center auth-switch">Đã có tài khoản? <a href="login">Đăng nhập</a></p>
         </div>
     </div>
 </div>

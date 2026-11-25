@@ -43,7 +43,7 @@ else
         @foreach (var friend in _friends)
         {
             <div class="list-item" @key="friend.UserId">
-                <UserIdentity UserId="friend.UserId" DisplayName="@friend.DisplayName" Username="@friend.Username" ShowBio="true" />
+                <UserIdentity UserId="friend.UserId" DisplayName="@friend.DisplayName" Username="@friend.Username" ShowBio="true" ShowPresence="true" />
 
                 <span class="actions">
                     <button type="button"

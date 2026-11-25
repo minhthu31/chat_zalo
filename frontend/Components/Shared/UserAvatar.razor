@@ -1,19 +1,47 @@
 @implements IDisposable
 @inject ProfileCache Profiles
 @inject ApiRequestSender Api
+@inject PresenceState Presence
 @using global::Chat.Client.Services
+@using global::Chat.Client.State
 
 @* Ảnh đại diện của một người. Có ảnh thì hiện ảnh, chưa có (hoặc chưa tải được) thì hiện chữ cái đầu của tên. *@
+@if (ShowPresence)
+{
+    var status = Presence.Find(UserId);
+    <span class="presence-avatar">
+        @Avatar
+        @if (status?.IsOnline == true)
+        {
+            <span class="presence-dot" role="img" aria-label="@status.Label" title="@status.Label"></span>
+        }
+    </span>
+}
+else
+{
+    @Avatar
+}
+
+@code {
+    private RenderFragment Avatar => @<text>
 @if (_src is not null)
 {
-    <img class="avatar @SizeClass avatar-img" src="@_src" alt="@DisplayName" />
+    <img class="avatar @SizeClass avatar-img" src="@_src" alt="@DisplayName" @onerror="UseInitial" />
 }
 else
 {
     <span class="avatar @SizeClass" aria-label="@DisplayName">@AvatarText.From(DisplayName)</span>
 }
+    </text>;
 
-@code {
+    [Parameter] public bool ShowPresence { get; set; }
+
+    protected override void OnInitialized() => Presence.Changed += OnPresenceChanged;
+
+    private void OnPresenceChanged()
+    {
+        if (ShowPresence) _ = InvokeAsync(StateHasChanged);
+    }
     [Parameter, EditorRequired]
     public Guid UserId { get; set; }
 
@@ -48,10 +76,14 @@ else
         if (UserId == Guid.Empty)
             return;
 
-        var profile = await Profiles.GetAsync(UserId);
-        if (profile?.AvatarUrl is { Length: > 0 } url)
-            _src = Api.ToAbsoluteUri(url) + "?v=" + Profiles.VersionOf(UserId);
+        var userId = UserId;
+        var version = Profiles.VersionOf(userId);
+        var profile = await Profiles.GetAsync(userId);
+        if (userId == UserId && version == Profiles.VersionOf(userId) && profile?.AvatarUrl is { Length: > 0 } url)
+            _src = Api.ToAbsoluteUri(url) + "?v=" + version;
     }
+
+    private void UseInitial() => _src = null;
 
     private void OnProfileChanged(Guid changed)
     {
@@ -59,5 +91,9 @@ else
             _ = InvokeAsync(async () => { await LoadAsync(); StateHasChanged(); });
     }
 
-    public void Dispose() => Profiles.Changed -= OnProfileChanged;
+    public void Dispose()
+    {
+        Profiles.Changed -= OnProfileChanged;
+        Presence.Changed -= OnPresenceChanged;
+    }
 }

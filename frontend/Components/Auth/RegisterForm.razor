@@ -9,13 +9,13 @@
 
     <div class="field">
         <label for="username">Tên đăng nhập</label>
-        <InputText id="username" @bind-Value="_model.Username" />
+        <InputText id="username" autocomplete="username" @bind-Value="_model.Username" />
         <ValidationMessage For="() => _model.Username" />
     </div>
 
     <div class="field">
         <label for="email">Email</label>
-        <InputText id="email" type="email" @bind-Value="_model.Email" />
+        <InputText id="email" autocomplete="email" type="email" @bind-Value="_model.Email" />
         <ValidationMessage For="() => _model.Email" />
     </div>
 

@@ -1,4 +1,5 @@
 @using global::Chat.Client.Models
+@using global::Chat.Client.Components.Shared
 @using global::Chat.Client.Services
 @implements IDisposable
 @inject IFriendshipApiClient Friendships
@@ -6,8 +7,14 @@
 @inject IJSRuntime JS
 
 <aside class="conversation-details" aria-label="Thông tin hội thoại">
-    <h2>Thông tin hội thoại</h2>
-    <div class="details-person"><span class="avatar">@Peer.Title[..1].ToUpperInvariant()</span><h3>@Peer.Title</h3><p class="muted">@@@Peer.Username</p></div>
+    <div class="details-heading">
+        <h2>Thông tin hội thoại</h2>
+        @if (ChildContent is not null)
+        {
+            <div class="details-notifications">@ChildContent</div>
+        }
+    </div>
+    <div class="details-person"><UserAvatar UserId="Peer.UserId" DisplayName="@Peer.Title" Size="lg" /><h3>@Peer.Title</h3><p class="muted">@@@Peer.Username</p></div>
     @if (loading) { <p class="muted" role="status">Đang kiểm tra trạng thái…</p> }
     else if (known) {
         <p class="details-status">@(blocked ? "Bạn đã chặn người này" : isFriend ? "Đang là bạn bè" : "Hiện không phải bạn bè")</p>
@@ -30,6 +37,7 @@
 @code {
     [Parameter, EditorRequired] public ConversationTitleDto Peer { get; set; } = default!;
     [Parameter] public int Revision { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
     [Parameter] public EventCallback OnChanged { get; set; }
     [Parameter] public EventCallback<bool> CanSendChanged { get; set; }
     private Guid loadedPeer;

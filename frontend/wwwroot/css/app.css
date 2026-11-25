@@ -16,12 +16,12 @@
 }
 
 .as-root {
-    --brand: #0068ff;
-    --brand-light: #4aa3ff;
-    --brand-dark: #0052cc;
-    --brand-soft: #e8f1ff;
+    --brand: #29664d;
+    --brand-light: #418266;
+    --brand-dark: #1f513c;
+    --brand-soft: #e5f1ea;
     --surface: #ffffff;
-    --field-bg: #f5f8fc;
+    --field-bg: #f5f7f8;
     --text: #1c2b33;
     --muted: #6b7a85;
     --border: #dfe6ee;
@@ -30,10 +30,10 @@
     --success: #1e8e3e;
     --success-soft: #e6f4ea;
     --radius: 16px;
-    --shadow: 0 1px 2px rgba(28, 43, 51, 0.04), 0 8px 24px rgba(0, 104, 255, 0.08);
+    --shadow: 0 1px 2px rgba(28, 43, 51, 0.04), 0 8px 24px rgba(41, 102, 77, 0.08);
 
     min-height: 100vh;
-    background: linear-gradient(160deg, #dbeaff 0%, #f4f7fb 45%, #eaf1f9 100%);
+    background: linear-gradient(160deg, #e5f1ea 0%, #f1f3f2 45%, #edf3ef 100%);
     color: var(--text);
     font-family: "Segoe UI", system-ui, -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif;
     font-size: 16px;
@@ -126,7 +126,7 @@
         margin: 0 auto 0.6rem;
         border-radius: 18px;
         background: linear-gradient(135deg, var(--brand), var(--brand-light));
-        box-shadow: 0 8px 20px rgba(0, 104, 255, 0.3);
+        box-shadow: 0 8px 20px rgba(41, 102, 77, 0.3);
         color: #ffffff;
         font-size: 1.7rem;
         font-weight: 800;
@@ -269,12 +269,12 @@
     .btn-primary {
         background: linear-gradient(135deg, var(--brand), var(--brand-light));
         color: #ffffff;
-        box-shadow: 0 4px 12px rgba(0, 104, 255, 0.28);
+        box-shadow: 0 4px 12px rgba(41, 102, 77, 0.28);
     }
 
     .btn-primary:hover:not(:disabled) {
         filter: brightness(1.06);
-        box-shadow: 0 6px 16px rgba(0, 104, 255, 0.34);
+        box-shadow: 0 6px 16px rgba(41, 102, 77, 0.34);
     }
 
     .btn-danger {
@@ -379,7 +379,7 @@
         height: 84px;
         margin: 0 auto 0.5rem;
         font-size: 2.2rem;
-        box-shadow: 0 8px 20px rgba(0, 104, 255, 0.28);
+        box-shadow: 0 8px 20px rgba(41, 102, 77, 0.28);
     }
 
     /* ----- Nút Trước / Sau của danh sách tìm kiếm ----- */
@@ -904,4 +904,10 @@
             align-items: flex-start;
         }
     }
+}
+
+.as-root input:-webkit-autofill {
+    -webkit-box-shadow: 0 0 0 1000px var(--field-bg) inset;
+    -webkit-text-fill-color: var(--text);
+    caret-color: var(--text);
 }

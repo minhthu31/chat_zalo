@@ -9,6 +9,7 @@
 @inject IJSRuntime JS
 
 <div class="userbar">
+    <a href="/chat" class="userbar-brand" aria-label="Chat Zalo"><span class="auth-mark" aria-hidden="true"><span></span><span></span></span></a>
     <nav class="userbar-links" aria-label="Điều hướng chính">
         <NavLink href="/chat" ActiveClass="active">Tin nhắn</NavLink>
         <NavLink href="/groups" ActiveClass="active">Nhóm</NavLink>
@@ -25,7 +26,7 @@
             <details class="userbar-account" @ref="accountMenu">
                 <summary aria-label="Menu tài khoản">
                     <UserAvatar UserId="user.Id" DisplayName="@user.DisplayName" Size="sm" />
-                    <span class="userbar-name">@user.DisplayName</span><span aria-hidden="true">⌄</span>
+                    <span class="userbar-name">@user.DisplayName</span>
                 </summary>
                 <div class="userbar-dropdown">
                     <header><strong>@user.DisplayName</strong><small>Đang hoạt động</small></header>
