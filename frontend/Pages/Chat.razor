@@ -74,12 +74,27 @@
                         <details class="conversation-menu" @key="id">
                             <summary aria-label="Tùy chọn hội thoại">•••</summary>
                             <div class="conversation-menu-popup">
-                                @if (IsGroup(id)) { <a class="btn btn-sm" href="/groups/@id">Xem nhóm</a> }
-                                @if (!conversationPeers.ContainsKey(id))
+                                @if (IsGroup(id))
+                                {
+                                    <section class="conversation-details group-menu-details" aria-label="Thông tin nhóm">
+                                        <div class="details-heading">
+                                            <h2>Thông tin nhóm</h2>
+                                            <div class="details-notifications">
+                                                <ConversationMuteButton ConversationId="id" IconOnly="true" />
+                                            </div>
+                                        </div>
+                                        <div class="details-person">
+                                            <span class="avatar" aria-hidden="true">@AvatarText.From(ConversationTitle(id))</span>
+                                            <h3>@ConversationTitle(id)</h3>
+                                        </div>
+                                        <a class="btn btn-sm" href="/groups/@id">Xem nhóm</a>
+                                    </section>
+                                }
+                                else if (!conversationPeers.ContainsKey(id))
                                 {
                                     <ConversationMuteButton ConversationId="id" />
                                 }
-                                @if (conversationPeers.TryGetValue(id, out var peer))
+                                else if (conversationPeers.TryGetValue(id, out var peer))
                                 {
                                     <ConversationDetails Peer="peer" Revision="detailsRevision" OnChanged="RefreshFriendshipsAsync" CanSendChanged="value => sendPermissions[id] = value">
                                         <ConversationMuteButton ConversationId="id" IconOnly="true" />
