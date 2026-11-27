@@ -1,8 +1,11 @@
 using System.Globalization;
 using System.Net;
 using System.Net.Mail;
+using System.Net.Http.Headers;
+using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using System.Threading.Channels;
 using Chat.Infrastructure.Identity;
 using Microsoft.AspNetCore.Identity;
@@ -13,6 +16,7 @@ namespace Chat.Api.Services;
 public sealed class PasswordRecovery(
     IServiceScopeFactory scopes,
     IConfiguration configuration,
+    IHttpClientFactory httpClients,
     ILogger<PasswordRecovery> logger) : BackgroundService
 {
     private static readonly TimeSpan CodeLifetime = TimeSpan.FromMinutes(10);
@@ -26,11 +30,20 @@ public sealed class PasswordRecovery(
     private sealed record Delivery(string Email, string Key);
     private sealed record Challenge(Guid UserId, string Token, byte[] Digest, int AttemptsLeft, DateTimeOffset Expires);
 
-    public bool IsConfigured => !string.IsNullOrWhiteSpace(configuration["PasswordRecovery:Smtp:Host"]) &&
-        MailAddress.TryCreate(configuration["PasswordRecovery:Smtp:From"] ?? "", out _) &&
-        configuration.GetValue("PasswordRecovery:Smtp:Port", 587) is >= 1 and <= 65535 &&
-        (string.IsNullOrWhiteSpace(configuration["PasswordRecovery:Smtp:Username"]) ||
-         !string.IsNullOrWhiteSpace(configuration["PasswordRecovery:Smtp:Password"]));
+    private IConfigurationSection Gmail => configuration.GetSection("PasswordRecovery:Gmail");
+
+    private bool UseGmail => Gmail.GetValue<bool>("Enabled");
+
+    public bool IsConfigured => UseGmail
+        ? MailAddress.TryCreate(Gmail["From"], out _) &&
+          !string.IsNullOrWhiteSpace(Gmail["ClientId"]) &&
+          !string.IsNullOrWhiteSpace(Gmail["ClientSecret"]) &&
+          !string.IsNullOrWhiteSpace(Gmail["RefreshToken"])
+        : !string.IsNullOrWhiteSpace(configuration["PasswordRecovery:Smtp:Host"]) &&
+          MailAddress.TryCreate(configuration["PasswordRecovery:Smtp:From"], out _) &&
+          configuration.GetValue("PasswordRecovery:Smtp:Port", 587) is >= 1 and <= 65535 &&
+          (string.IsNullOrWhiteSpace(configuration["PasswordRecovery:Smtp:Username"]) ||
+           !string.IsNullOrWhiteSpace(configuration["PasswordRecovery:Smtp:Password"]));
 
     public bool Enqueue(string email, string key)
     {
@@ -107,9 +120,27 @@ public sealed class PasswordRecovery(
         var challenge = new Challenge(user.Id, token, Hash(code), MaxAttempts,
             DateTimeOffset.UtcNow.Add(CodeLifetime));
 
-        using var mail = new MailMessage(configuration["PasswordRecovery:Smtp:From"]!, user.Email,
-            "Chat Zalo - Mã đặt lại mật khẩu",
-            $"Mã đặt lại mật khẩu của bạn là {code}. Mã có hiệu lực trong 10 phút. Nếu bạn không yêu cầu, hãy bỏ qua email này.");
+        const string subject = "Chat Zalo - Mã đặt lại mật khẩu";
+        var body = $"Mã đặt lại mật khẩu của bạn là {code}. Mã có hiệu lực trong 10 phút. Nếu bạn không yêu cầu, hãy bỏ qua email này.";
+
+        lock (gate) Store(request.Key, challenge);
+        try
+        {
+            if (UseGmail)
+                await SendWithGmailAsync(user.Email, subject, body, ct);
+            else
+                await SendWithSmtpAsync(user.Email, subject, body, ct);
+        }
+        catch
+        {
+            lock (gate) cache.Remove((request.Key, "code"));
+            throw;
+        }
+    }
+
+    private async Task SendWithSmtpAsync(string email, string subject, string body, CancellationToken ct)
+    {
+        using var mail = new MailMessage(configuration["PasswordRecovery:Smtp:From"]!, email, subject, body);
         using var smtp = new SmtpClient(configuration["PasswordRecovery:Smtp:Host"]!,
             configuration.GetValue("PasswordRecovery:Smtp:Port", 587))
         {
@@ -120,16 +151,39 @@ public sealed class PasswordRecovery(
         if (!string.IsNullOrWhiteSpace(username))
             smtp.Credentials = new NetworkCredential(username, configuration["PasswordRecovery:Smtp:Password"]);
 
-        lock (gate) Store(request.Key, challenge);
-        try
+        await smtp.SendMailAsync(mail, ct);
+    }
+
+    private async Task SendWithGmailAsync(string email, string subject, string body, CancellationToken ct)
+    {
+        var gmail = Gmail;
+        using var client = httpClients.CreateClient("Gmail");
+        using var refresh = new FormUrlEncodedContent(new Dictionary<string, string>
         {
-            await smtp.SendMailAsync(mail, ct);
-        }
-        catch
-        {
-            lock (gate) cache.Remove((request.Key, "code"));
-            throw;
-        }
+            ["client_id"] = gmail["ClientId"]!,
+            ["client_secret"] = gmail["ClientSecret"]!,
+            ["refresh_token"] = gmail["RefreshToken"]!,
+            ["grant_type"] = "refresh_token"
+        });
+        using var token = await client.PostAsync("https://oauth2.googleapis.com/token", refresh, ct);
+        token.EnsureSuccessStatusCode();
+        using var tokenJson = await token.Content.ReadFromJsonAsync<JsonDocument>(cancellationToken: ct)
+            ?? throw new InvalidOperationException("Empty Gmail OAuth response.");
+
+        var from = new MailAddress(gmail["From"]!).Address;
+        var to = new MailAddress(email).Address;
+        var encodedSubject = Convert.ToBase64String(Encoding.UTF8.GetBytes(subject));
+        var encodedBody = Convert.ToBase64String(Encoding.UTF8.GetBytes(body), Base64FormattingOptions.InsertLineBreaks);
+        var mime = $"From: {from}\r\nTo: {to}\r\nSubject: =?UTF-8?B?{encodedSubject}?=\r\n" +
+            "MIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n" +
+            $"Content-Transfer-Encoding: base64\r\n\r\n{encodedBody}\r\n";
+        var raw = Convert.ToBase64String(Encoding.UTF8.GetBytes(mime))
+            .TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        using var send = new HttpRequestMessage(HttpMethod.Post, "https://gmail.googleapis.com/gmail/v1/users/me/messages/send");
+        send.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenJson.RootElement.GetProperty("access_token").GetString());
+        send.Content = JsonContent.Create(new { raw });
+        using var response = await client.SendAsync(send, ct);
+        response.EnsureSuccessStatusCode();
     }
 
     private void Store(string key, Challenge challenge) =>
