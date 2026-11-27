@@ -42,7 +42,6 @@ dotnet test backend/Chat.sln
 ```
 
 Kết quả xác minh source chính trên PostgreSQL 18.6: 17/17 test đạt.
-Xem [báo cáo CHAT-1](../PRE_PUSH_REVIEW.md) và [schema thực tế](CHAT1_SCHEMA_EVIDENCE.txt).
 Rules trong repo hiện là v1.1; cần bản v1.2 của leader để xác nhận phần chênh lệch.
 
 Mật khẩu Compose chỉ dùng demo local. Với tài khoản riêng, cấu hình bằng biến môi trường; không commit mật khẩu thật.
