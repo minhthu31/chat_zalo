@@ -187,6 +187,7 @@ builder.Services.AddScoped<IUserAccountGateway, IdentityUserAccountGateway>();
 builder.Services.AddScoped<IMessageService, Chat.Infrastructure.Services.MessageService>();
 builder.Services.AddScoped<IGroupService, Chat.Infrastructure.Services.GroupService>();
 
+builder.Services.AddHttpClient("Gmail");
 builder.Services.AddSingleton<PasswordRecovery>();
 builder.Services.AddHostedService(services => services.GetRequiredService<PasswordRecovery>());
 builder.Services.AddRateLimiter(options =>
