@@ -19,17 +19,34 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 
 var builder = WebApplication.CreateBuilder(args);
 var configuration = builder.Configuration;
 
 // Read local configuration or override with environment variables.
+var databaseUrl = configuration["DATABASE_URL"];
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
-    ?? builder.Configuration.GetConnectionString("ChatDb")
-    ?? throw new InvalidOperationException("Configure ConnectionStrings:ChatDb or ConnectionStrings:DefaultConnection.");
+    ?? builder.Configuration.GetConnectionString("ChatDb");
+
+if (!string.IsNullOrWhiteSpace(databaseUrl))
+{
+    var database = new Uri(databaseUrl);
+    var credentials = database.UserInfo.Split(':', 2);
+    connectionString = new NpgsqlConnectionStringBuilder
+    {
+        Host = database.Host,
+        Port = database.Port > 0 ? database.Port : 5432,
+        Database = Uri.UnescapeDataString(database.AbsolutePath.TrimStart('/')),
+        Username = Uri.UnescapeDataString(credentials[0]),
+        Password = Uri.UnescapeDataString(credentials[1]),
+        SslMode = SslMode.Require
+    }.ConnectionString;
+}
 
 builder.Services.AddDbContext<ChatDbContext>(options =>
-    options.UseNpgsql(connectionString));
+    options.UseNpgsql(connectionString
+        ?? throw new InvalidOperationException("Configure DATABASE_URL or a ChatDb connection string.")));
 
 var dataProtection = builder.Services.AddDataProtection();
 var keyPath = configuration["DataProtection:KeyPath"];
@@ -249,6 +266,7 @@ builder.Services.AddScoped<IMessageReceiptService, MessageReceiptService>();
 
 
 var app = builder.Build();
+var serveClient = configuration.GetValue<bool>("ServeClient");
 
 // Manual operator command; this mode does not start an HTTP server.
 if (configuration.GetValue<bool>("cleanup-pending"))
@@ -264,6 +282,10 @@ if (configuration.GetValue<bool>("cleanup-pending"))
 }
 
 app.UseForwardedHeaders();
+if (serveClient)
+{
+    app.UseStaticFiles(new StaticFileOptions { ServeUnknownFileTypes = true });
+}
 app.UseRouting();
 
 // Middleware order: CORS -> Authentication -> Authorization
@@ -280,4 +302,15 @@ if (app.Environment.IsDevelopment())
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapControllers();
 app.MapHub<ChatHub>("/hubs/chat");
+if (serveClient)
+{
+    app.MapFallbackToFile("index.html");
+}
+
+if (configuration.GetValue<bool>("MigrateOnStart"))
+{
+    await using var scope = app.Services.CreateAsyncScope();
+    await scope.ServiceProvider.GetRequiredService<ChatDbContext>().Database.MigrateAsync();
+}
+
 app.Run();
