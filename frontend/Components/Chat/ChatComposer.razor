@@ -3,7 +3,7 @@
 @using global::Chat.Client.Models
 @using Microsoft.AspNetCore.Components.Forms
 @inject IJSRuntime JS
-<form class="composer" @onsubmit="() => OnSend.InvokeAsync()" @onsubmit:preventDefault>
+<form class="composer" @onsubmit="SendAsync" @onsubmit:preventDefault>
     <label for="chat-body">Tin nhắn</label>
     <textarea id="chat-body" @ref="_textarea" value="@Body" @oninput="UpdateBody" maxlength="4000" rows="3"
               disabled="@(Disabled || Retry)" placeholder="Nhập tin nhắn…"></textarea>
@@ -17,7 +17,7 @@
                     <span class="file-chip-name" title="@file.Name">@file.Name</span>
                     <small>@AttachmentLimits.FormatSize(file.Size)@(file.Uploaded is not null ? " · đã tải lên" : "")</small>
                     <button type="button" class="file-chip-remove" aria-label="Bỏ tệp @file.Name"
-                            disabled="@Disabled" @onclick="() => RemoveFileAsync(file)">×</button>
+                            disabled="@(Disabled || _readingFiles)" @onclick="() => RemoveFileAsync(file)">×</button>
                 </li>
             }
         </ul>
@@ -29,12 +29,12 @@
 
     <div><small>@Body.Length / 4.000</small>
         <span class="composer-actions">
-            <label class="btn btn-sm file-btn @(Disabled ? "disabled" : "")" title="Đính kèm ảnh hoặc tệp (tối đa 5 tệp, 10 MB mỗi tệp, 50 MB mỗi tin)">
+            <label class="btn btn-sm file-btn @((Disabled || _readingFiles) ? "disabled" : "")" title="Đính kèm ảnh hoặc tệp (tối đa 5 tệp, 10 MB mỗi tệp, 50 MB mỗi tin)">
                 📎 Đính kèm
                 <InputFile @ref="_input" OnChange="OnFilesChosenAsync" multiple accept="@AttachmentLimits.Accept"
-                           disabled="@Disabled" class="file-input-hidden" />
+                           disabled="@(Disabled || _readingFiles)" class="file-input-hidden" />
             </label>
-            <button class="btn btn-primary" type="submit" disabled="@(Disabled || (string.IsNullOrWhiteSpace(Body) && Files.Count == 0))">@(Retry ? "Thử gửi lại" : "Gửi tin nhắn")</button>
+            <button class="btn btn-primary" type="submit" disabled="@(Disabled || _readingFiles || (string.IsNullOrWhiteSpace(Body) && Files.Count == 0))">@(Retry ? "Thử gửi lại" : "Gửi tin nhắn")</button>
         </span>
     </div>
     @if (Retry) { <small>Nội dung được giữ nguyên để thử lại an toàn sau lỗi mạng.</small> }
@@ -54,8 +54,11 @@
     [Parameter] public string? UploadStatus { get; set; }
 
     private string? _fileError;
+    private bool _readingFiles;
     private InputFile? _input;
     private ElementReference _textarea;
+
+    private Task SendAsync() => _readingFiles || Disabled ? Task.CompletedTask : OnSend.InvokeAsync();
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -69,6 +72,21 @@
 
     // Chọn tệp xong thì kiểm tra từng tệp (số lượng, loại, dung lượng) ngay ở FE, tệp nào đạt mới thêm vào danh sách
     private async Task OnFilesChosenAsync(InputFileChangeEventArgs e)
+    {
+        if (_readingFiles || Disabled) return;
+
+        _readingFiles = true;
+        try
+        {
+            await ReadSelectedFilesAsync(e);
+        }
+        finally
+        {
+            _readingFiles = false;
+        }
+    }
+
+    private async Task ReadSelectedFilesAsync(InputFileChangeEventArgs e)
     {
         var problems = new List<string>();
         IReadOnlyList<IBrowserFile> chosen;
@@ -92,14 +110,24 @@
                 continue;
             }
 
-            var file = browserFile;
-            Files.Add(new OutgoingFile
+            try
             {
-                Name = file.Name,
-                Size = file.Size,
-                ContentType = AttachmentLimits.ContentTypeFor(file.Name)!,
-                Open = () => file.OpenReadStream(AttachmentLimits.MaxFileBytes)
-            });
+                // InputFile thay danh sách tham chiếu của trình duyệt mỗi lần chọn.
+                await using var source = browserFile.OpenReadStream(AttachmentLimits.MaxFileBytes);
+                var bytes = new byte[checked((int)browserFile.Size)];
+                await source.ReadExactlyAsync(bytes);
+                Files.Add(new OutgoingFile
+                {
+                    Name = browserFile.Name,
+                    Size = bytes.Length,
+                    ContentType = AttachmentLimits.ContentTypeFor(browserFile.Name)!,
+                    Open = () => new MemoryStream(bytes, writable: false)
+                });
+            }
+            catch (Exception ex) when (ex is IOException or JSException)
+            {
+                problems.Add($"Không đọc được tệp \"{browserFile.Name}\". Hãy chọn lại tệp.");
+            }
         }
 
         _fileError = problems.Count == 0 ? null : string.Join(" ", problems);
