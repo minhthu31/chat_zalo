@@ -301,8 +301,8 @@ public sealed class AttachmentMessageService : IAttachmentMessageService
         {
             visibleMessages = visibleMessages.Where(m =>
                 !_db.UserBlocks.Any(b =>
-                    b.BlockerUserId == m.SenderUserId &&
-                    b.BlockedUserId == currentUserId));
+                    (b.BlockerUserId == m.SenderUserId && b.BlockedUserId == currentUserId) ||
+                    (b.BlockerUserId == currentUserId && b.BlockedUserId == m.SenderUserId)));
         }
 
         var visibleIds = await visibleMessages

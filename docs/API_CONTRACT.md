@@ -559,7 +559,7 @@ AdminTransferDto: {"id":"Guid","conversationId":"Guid","fromUserId":"Guid","toUs
 ## 10. Blocks, Messages, SignalR trong Group
 
 - Thành viên được mời **bạn bè Accepted của chính mình**; các thành viên nhóm không cần kết bạn với nhau. Group hoạt động có **đúng một Admin**. Người rời/bị xóa không được đọc/gửi/Join nhóm.
-- **A chặn B:** B không được xem tin cũ và mới **do A gửi** trong nhóm; vẫn xem tin của C, gửi tin và giữ tư cách thành viên. Bỏ chặn → tin A hiện lại. Backend lọc **trước LIMIT** để lấy đủ tối đa 10 tin được xem; Seq có thể nhảy. Không lộ `body`/preview của tin bị ẩn. **Quy tắc Direct không đổi.**
+- **A chặn B:** A và B đều không xem được tin cũ, tin mới và tệp đính kèm của nhau trong nhóm. Cả hai vẫn xem tin của C, gửi tin và giữ tư cách thành viên. Tin hiện lại khi không còn lượt chặn nào giữa hai người. Backend lọc **trước LIMIT** để lấy đủ tối đa 10 tin được xem; Seq có thể nhảy. Không lộ `body`/preview của tin bị ẩn. **Quy tắc Direct không đổi.**
 - Group dùng **cùng API Messages**, cùng `MessageResponse`, Seq, retry; FE yêu cầu `limit=10`, Backend vẫn mặc định `20`.
 - SignalR Hub `/hubs/chat`: event `ConversationChanged` payload `{eventId,conversationId,latestSeq}`. Chỉ **connection đã Join** và còn quyền mới nhận event. Không phát trước khi DB commit. FE nhận event thì GET Messages bằng `afterSeq`; khi reconnect phải Join lại và đồng bộ. SignalR không phát nội dung tin nhắn.
 
@@ -719,7 +719,7 @@ Quy định:
 Chi tiết CHAT-24/CHAT-26:
 
 - Một lần upload một file; upload chỉ tạo StoredFiles `Pending`, chưa tạo tin hoặc phát event. File Pending chỉ uploader còn quyền hội thoại được xem/tải.
-- File Attached chỉ được xem/tải khi người gọi được xem tin liên kết, bao gồm `JoinedSeq`, membership và Blocks. Direct giữ quy tắc Sprint 1; Group lọc theo người gửi đã chặn người xem, không cấm toàn nhóm.
+- File Attached chỉ được xem/tải khi người gọi được xem tin liên kết, bao gồm `JoinedSeq`, membership và Blocks. Trong nhóm, tệp bị ẩn giữa hai người khi một trong hai chặn người còn lại.
 - Content/download trả MIME kiểm tra từ nội dung, `Cache-Control: private, no-store`, `X-Content-Type-Options: nosniff`; không trả storage key hoặc đường dẫn máy chủ.
 - Dọn Pending thủ công theo cutoff/limit do người vận hành chọn; khóa và kiểm tra lại trạng thái/liên kết trước khi xóa. Không tự dọn sau 24 giờ; không xóa Attached hoặc Avatar đang dùng. Cấu hình và lệnh: [CHAT24_STORAGE.md](CHAT24_STORAGE.md).
 - Endpoint gửi kèm file yêu cầu `attachmentIds` có 1–5 Guid khác nhau, không rỗng; trùng ID/thiếu danh sách/sai số lượng: `400 INVALID_ATTACHMENT_COUNT`. `clientMessageId` không được là Guid rỗng; lỗi dữ liệu khác: `400 VALIDATION_ERROR`.
@@ -820,7 +820,7 @@ Chi tiết CHAT-28:
 - Chat nhóm dùng cùng hai endpoint PUT nhưng `seq` dương xác nhận đúng một tin. Response bổ sung `messageId`, `seq`, `isDelivered` và `isRead`. GET bổ sung `messages` gồm `messageId`, `seq`, `senderUserId`, `deliveredByUserIds` và `readByUserIds`. FE tra tên từ `items` và dùng các danh sách theo tin để hiển thị receipts nhóm.
 - Khi tải một trang chat nhóm, FE gọi GET receipts với `?messageIds=id1,id2` theo các tin trên trang, tối đa 100 ID. GET chỉ trả các tin trong nhóm mà người gọi còn quyền xem, theo thứ tự seq tăng dần. Khi bỏ qua tham số, BE trả tối đa 100 tin mới nhất người gọi được xem. Chat cá nhân vẫn dùng `items`.
 - `seq=0` trả mốc hiện tại sau khi kiểm tra quyền, không cập nhật hoặc phát event. Với nhóm, GET cung cấp trạng thái theo tin. Xác nhận Đã xem cũng ghi Đã nhận. Gửi lại xác nhận đã lưu và còn quyền xem trả kết quả hiện tại, không ghi lại hoặc phát event.
-- Nhóm áp dụng `JoinedSeq` và Blocks cho từng tin. Khi A chặn B, B vẫn xác nhận được tin của C. Xác nhận tin của A đang bị ẩn trả `403 CONVERSATION_ACCESS_DENIED`. Sau khi bỏ chặn, FE gửi Đã nhận khi tải được tin và Đã xem khi tin xuất hiện trong vùng nhìn thấy. BE lưu từng xác nhận riêng, kể cả với tin cũ hơn tin C.
+- Nhóm áp dụng `JoinedSeq` và Blocks cho từng tin. Khi A chặn B, cả hai vẫn xác nhận được tin của C. Xác nhận tin bị ẩn do chặn trả `403 CONVERSATION_ACCESS_DENIED`. Sau khi không còn lượt chặn nào giữa hai người, FE gửi Đã nhận khi tải được tin và Đã xem khi tin xuất hiện trong vùng nhìn thấy. BE lưu từng xác nhận riêng, kể cả với tin cũ hơn tin C.
 - Event chỉ phát sau commit và khi trạng thái đổi, tới các connection đã Join và còn quyền xem. Nhóm kiểm tra quyền xem tin đích cho từng người nhận event.
 
 ### 6. SignalR
