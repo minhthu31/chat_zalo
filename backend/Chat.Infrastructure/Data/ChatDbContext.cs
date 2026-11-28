@@ -20,6 +20,7 @@ public class ChatDbContext : IdentityDbContext<ApplicationUser, IdentityRole<Gui
     public DbSet<GroupConversation> GroupConversations => Set<GroupConversation>();
     public DbSet<GroupAdminTransferRequest> GroupAdminTransferRequests => Set<GroupAdminTransferRequest>();
     public DbSet<Message> Messages => Set<Message>();
+    public DbSet<PinnedMessage> PinnedMessages => Set<PinnedMessage>();
     public DbSet<MessageUserReceipt> MessageUserReceipts => Set<MessageUserReceipt>();
     public DbSet<StoredFile> StoredFiles => Set<StoredFile>();
     public DbSet<MessageAttachment> MessageAttachments => Set<MessageAttachment>();
