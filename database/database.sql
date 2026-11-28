@@ -679,3 +679,710 @@ BEGIN
     END IF;
 END $EF$;
 COMMIT;
+
+START TRANSACTION;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20261107172222_AddGroupConversationsAndAdminTransfers') THEN
+    CREATE TABLE "GroupConversations" (
+        "ConversationId" uuid NOT NULL,
+        "Name" character varying(100) NOT NULL,
+        "DeletedAt" timestamp with time zone,
+        CONSTRAINT "PK_GroupConversations" PRIMARY KEY ("ConversationId"),
+        CONSTRAINT "CK_GroupConversations_Name" CHECK ("Name" ~ '[^[:space:]]'),
+        CONSTRAINT "FK_GroupConversations_Conversations_ConversationId" FOREIGN KEY ("ConversationId") REFERENCES "Conversations" ("Id") ON DELETE CASCADE
+    );
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20261107172222_AddGroupConversationsAndAdminTransfers') THEN
+    CREATE TABLE "GroupAdminTransferRequests" (
+        "Id" uuid NOT NULL,
+        "ConversationId" uuid NOT NULL,
+        "FromUserId" uuid NOT NULL,
+        "ToUserId" uuid NOT NULL,
+        "Status" character varying(20) NOT NULL,
+        "CreatedAt" timestamp with time zone NOT NULL,
+        "ResolvedAt" timestamp with time zone,
+        CONSTRAINT "PK_GroupAdminTransferRequests" PRIMARY KEY ("Id"),
+        CONSTRAINT "CK_GroupAdminTransferRequests_DifferentUsers" CHECK ("FromUserId" <> "ToUserId"),
+        CONSTRAINT "CK_GroupAdminTransferRequests_Resolution" CHECK (("Status" = 'Pending') = ("ResolvedAt" IS NULL)),
+        CONSTRAINT "CK_GroupAdminTransferRequests_Status" CHECK ("Status" IN ('Pending', 'Accepted', 'Rejected', 'Cancelled')),
+        CONSTRAINT "FK_GroupAdminTransferRequests_ConversationMembers_Conversation~" FOREIGN KEY ("ConversationId", "FromUserId") REFERENCES "ConversationMembers" ("ConversationId", "UserId") ON DELETE RESTRICT,
+        CONSTRAINT "FK_GroupAdminTransferRequests_ConversationMembers_Conversatio~1" FOREIGN KEY ("ConversationId", "ToUserId") REFERENCES "ConversationMembers" ("ConversationId", "UserId") ON DELETE RESTRICT,
+        CONSTRAINT "FK_GroupAdminTransferRequests_GroupConversations_ConversationId" FOREIGN KEY ("ConversationId") REFERENCES "GroupConversations" ("ConversationId") ON DELETE CASCADE
+    );
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20261107172222_AddGroupConversationsAndAdminTransfers') THEN
+    CREATE UNIQUE INDEX "IX_ConversationMembers_OneActiveAdmin" ON "ConversationMembers" ("ConversationId") WHERE "Role" = 'Admin' AND "LeftAt" IS NULL;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20261107172222_AddGroupConversationsAndAdminTransfers') THEN
+    CREATE INDEX "IX_GroupAdminTransferRequests_ConversationId_FromUserId" ON "GroupAdminTransferRequests" ("ConversationId", "FromUserId");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20261107172222_AddGroupConversationsAndAdminTransfers') THEN
+    CREATE INDEX "IX_GroupAdminTransferRequests_ConversationId_ToUserId" ON "GroupAdminTransferRequests" ("ConversationId", "ToUserId");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20261107172222_AddGroupConversationsAndAdminTransfers') THEN
+    CREATE UNIQUE INDEX "IX_GroupAdminTransferRequests_OnePending" ON "GroupAdminTransferRequests" ("ConversationId") WHERE "Status" = 'Pending';
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20261107172222_AddGroupConversationsAndAdminTransfers') THEN
+    CREATE INDEX "IX_GroupConversations_DeletedAt" ON "GroupConversations" ("DeletedAt");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20261107172222_AddGroupConversationsAndAdminTransfers') THEN
+    CREATE OR REPLACE FUNCTION check_group_has_one_admin() RETURNS trigger AS $BODY$
+    DECLARE
+        group_ids uuid[] := '{}';
+        gid uuid;
+        group_kind text;
+        deleted_at timestamptz;
+        active_admin_count integer;
+        has_metadata boolean;
+    BEGIN
+        IF TG_TABLE_NAME = 'Conversations' THEN
+            IF TG_OP = 'DELETE' THEN
+                group_ids := ARRAY[OLD."Id"];
+            ELSIF TG_OP = 'UPDATE' THEN
+                IF OLD."Id" <> NEW."Id" THEN
+                    group_ids := ARRAY[OLD."Id", NEW."Id"];
+                ELSE
+                    group_ids := ARRAY[NEW."Id"];
+                END IF;
+            ELSE
+                group_ids := ARRAY[NEW."Id"];
+            END IF;
+        ELSIF TG_TABLE_NAME = 'GroupConversations' THEN
+            IF TG_OP = 'DELETE' THEN
+                group_ids := ARRAY[OLD."ConversationId"];
+            ELSIF TG_OP = 'UPDATE' THEN
+                IF OLD."ConversationId" <> NEW."ConversationId" THEN
+                    group_ids := ARRAY[OLD."ConversationId", NEW."ConversationId"];
+                ELSE
+                    group_ids := ARRAY[NEW."ConversationId"];
+                END IF;
+            ELSE
+                group_ids := ARRAY[NEW."ConversationId"];
+            END IF;
+        ELSIF TG_TABLE_NAME = 'ConversationMembers' THEN
+            IF TG_OP = 'DELETE' THEN
+                group_ids := ARRAY[OLD."ConversationId"];
+            ELSIF TG_OP = 'UPDATE' THEN
+                IF OLD."ConversationId" <> NEW."ConversationId" THEN
+                    group_ids := ARRAY[OLD."ConversationId", NEW."ConversationId"];
+                ELSE
+                    group_ids := ARRAY[NEW."ConversationId"];
+                END IF;
+            ELSE
+                group_ids := ARRAY[NEW."ConversationId"];
+            END IF;
+        END IF;
+
+        FOREACH gid IN ARRAY group_ids LOOP
+            SELECT c."Kind" INTO group_kind
+            FROM "Conversations" c
+            WHERE c."Id" = gid;
+
+            IF NOT FOUND THEN
+                CONTINUE;
+            END IF;
+
+            SELECT g."DeletedAt" INTO deleted_at
+            FROM "GroupConversations" g
+            WHERE g."ConversationId" = gid
+            FOR UPDATE OF g;
+
+            has_metadata := FOUND;
+
+            IF group_kind <> 'Group' THEN
+                IF has_metadata THEN
+                    RAISE EXCEPTION 'GroupConversations requires Kind=Group'
+                        USING ERRCODE = '23514', CONSTRAINT = 'CK_GroupConversations_Kind';
+                END IF;
+                CONTINUE;
+            END IF;
+
+            IF NOT has_metadata THEN
+                RAISE EXCEPTION 'Active group must have metadata and exactly one active admin'
+                    USING ERRCODE = '23514', CONSTRAINT = 'CK_GroupConversations_OneActiveAdmin';
+            END IF;
+
+            IF EXISTS (
+                SELECT 1 FROM "ConversationMembers"
+                WHERE "ConversationId" = gid
+                  AND "Role" NOT IN ('Admin', 'Member')
+            ) THEN
+                RAISE EXCEPTION 'Group members must have Admin or Member role'
+                    USING ERRCODE = '23514', CONSTRAINT = 'CK_GroupConversationMembers_Role';
+            END IF;
+
+            IF deleted_at IS NOT NULL THEN
+                CONTINUE;
+            END IF;
+
+            SELECT count(*) INTO active_admin_count
+            FROM "ConversationMembers"
+            WHERE "ConversationId" = gid
+              AND "Role" = 'Admin'
+              AND "LeftAt" IS NULL;
+
+            IF active_admin_count <> 1 THEN
+                RAISE EXCEPTION 'Active group must have exactly one active admin'
+                    USING ERRCODE = '23514', CONSTRAINT = 'CK_GroupConversations_OneActiveAdmin';
+            END IF;
+        END LOOP;
+
+        RETURN NULL;
+    END;
+    $BODY$ LANGUAGE plpgsql;
+
+    CREATE CONSTRAINT TRIGGER "TR_GroupConversations_OneActiveAdmin"
+    AFTER INSERT OR UPDATE OR DELETE ON "GroupConversations"
+    DEFERRABLE INITIALLY DEFERRED
+    FOR EACH ROW EXECUTE FUNCTION check_group_has_one_admin();
+
+    CREATE CONSTRAINT TRIGGER "TR_ConversationMembers_OneActiveAdmin"
+    AFTER INSERT OR UPDATE OR DELETE ON "ConversationMembers"
+    DEFERRABLE INITIALLY DEFERRED
+    FOR EACH ROW EXECUTE FUNCTION check_group_has_one_admin();
+
+    CREATE CONSTRAINT TRIGGER "TR_Conversations_GroupKind"
+    AFTER INSERT OR UPDATE ON "Conversations"
+    DEFERRABLE INITIALLY DEFERRED
+    FOR EACH ROW EXECUTE FUNCTION check_group_has_one_admin();
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20261107172222_AddGroupConversationsAndAdminTransfers') THEN
+    INSERT INTO "__EFMigrationsHistory" ("MigrationId", "ProductVersion")
+    VALUES ('20261107172222_AddGroupConversationsAndAdminTransfers', '10.0.14');
+    END IF;
+END $EF$;
+COMMIT;
+
+START TRANSACTION;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20261109173241_RepairGroupAdminConstraints') THEN
+    CREATE OR REPLACE FUNCTION check_group_has_one_admin() RETURNS trigger AS $BODY$
+    DECLARE
+        group_ids uuid[] := '{}';
+        gid uuid;
+        group_kind text;
+        deleted_at timestamptz;
+        active_admin_count integer;
+        has_metadata boolean;
+    BEGIN
+        IF TG_TABLE_NAME = 'Conversations' THEN
+            IF TG_OP = 'DELETE' THEN
+                group_ids := ARRAY[OLD."Id"];
+            ELSIF TG_OP = 'UPDATE' THEN
+                IF OLD."Id" <> NEW."Id" THEN
+                    group_ids := ARRAY[OLD."Id", NEW."Id"];
+                ELSE
+                    group_ids := ARRAY[NEW."Id"];
+                END IF;
+            ELSE
+                group_ids := ARRAY[NEW."Id"];
+            END IF;
+        ELSIF TG_TABLE_NAME = 'GroupConversations' THEN
+            IF TG_OP = 'DELETE' THEN
+                group_ids := ARRAY[OLD."ConversationId"];
+            ELSIF TG_OP = 'UPDATE' THEN
+                IF OLD."ConversationId" <> NEW."ConversationId" THEN
+                    group_ids := ARRAY[OLD."ConversationId", NEW."ConversationId"];
+                ELSE
+                    group_ids := ARRAY[NEW."ConversationId"];
+                END IF;
+            ELSE
+                group_ids := ARRAY[NEW."ConversationId"];
+            END IF;
+        ELSIF TG_TABLE_NAME = 'ConversationMembers' THEN
+            IF TG_OP = 'DELETE' THEN
+                group_ids := ARRAY[OLD."ConversationId"];
+            ELSIF TG_OP = 'UPDATE' THEN
+                IF OLD."ConversationId" <> NEW."ConversationId" THEN
+                    group_ids := ARRAY[OLD."ConversationId", NEW."ConversationId"];
+                ELSE
+                    group_ids := ARRAY[NEW."ConversationId"];
+                END IF;
+            ELSE
+                group_ids := ARRAY[NEW."ConversationId"];
+            END IF;
+        END IF;
+
+        FOREACH gid IN ARRAY group_ids LOOP
+            SELECT c."Kind" INTO group_kind
+            FROM "Conversations" c
+            WHERE c."Id" = gid;
+
+            IF NOT FOUND THEN
+                CONTINUE;
+            END IF;
+
+            SELECT g."DeletedAt" INTO deleted_at
+            FROM "GroupConversations" g
+            WHERE g."ConversationId" = gid
+            FOR UPDATE OF g;
+
+            has_metadata := FOUND;
+
+            IF group_kind <> 'Group' THEN
+                IF has_metadata THEN
+                    RAISE EXCEPTION 'GroupConversations requires Kind=Group'
+                        USING ERRCODE = '23514', CONSTRAINT = 'CK_GroupConversations_Kind';
+                END IF;
+                CONTINUE;
+            END IF;
+
+            IF NOT has_metadata THEN
+                RAISE EXCEPTION 'Active group must have metadata and exactly one active admin'
+                    USING ERRCODE = '23514', CONSTRAINT = 'CK_GroupConversations_OneActiveAdmin';
+            END IF;
+
+            IF EXISTS (
+                SELECT 1 FROM "ConversationMembers"
+                WHERE "ConversationId" = gid
+                  AND "Role" NOT IN ('Admin', 'Member')
+            ) THEN
+                RAISE EXCEPTION 'Group members must have Admin or Member role'
+                    USING ERRCODE = '23514', CONSTRAINT = 'CK_GroupConversationMembers_Role';
+            END IF;
+
+            IF deleted_at IS NOT NULL THEN
+                CONTINUE;
+            END IF;
+
+            SELECT count(*) INTO active_admin_count
+            FROM "ConversationMembers"
+            WHERE "ConversationId" = gid
+              AND "Role" = 'Admin'
+              AND "LeftAt" IS NULL;
+
+            IF active_admin_count <> 1 THEN
+                RAISE EXCEPTION 'Active group must have exactly one active admin'
+                    USING ERRCODE = '23514', CONSTRAINT = 'CK_GroupConversations_OneActiveAdmin';
+            END IF;
+        END LOOP;
+
+        RETURN NULL;
+    END;
+    $BODY$ LANGUAGE plpgsql;
+
+    DROP TRIGGER IF EXISTS "TR_GroupConversations_OneActiveAdmin" ON "GroupConversations";
+    CREATE CONSTRAINT TRIGGER "TR_GroupConversations_OneActiveAdmin"
+    AFTER INSERT OR UPDATE OR DELETE ON "GroupConversations"
+    DEFERRABLE INITIALLY DEFERRED
+    FOR EACH ROW EXECUTE FUNCTION check_group_has_one_admin();
+
+    DROP TRIGGER IF EXISTS "TR_ConversationMembers_OneActiveAdmin" ON "ConversationMembers";
+    CREATE CONSTRAINT TRIGGER "TR_ConversationMembers_OneActiveAdmin"
+    AFTER INSERT OR UPDATE OR DELETE ON "ConversationMembers"
+    DEFERRABLE INITIALLY DEFERRED
+    FOR EACH ROW EXECUTE FUNCTION check_group_has_one_admin();
+
+    DROP TRIGGER IF EXISTS "TR_Conversations_GroupKind" ON "Conversations";
+    CREATE CONSTRAINT TRIGGER "TR_Conversations_GroupKind"
+    AFTER INSERT OR UPDATE ON "Conversations"
+    DEFERRABLE INITIALLY DEFERRED
+    FOR EACH ROW EXECUTE FUNCTION check_group_has_one_admin();
+
+    DO $BODY$
+    BEGIN
+        IF EXISTS (
+            SELECT 1
+            FROM "Conversations" c
+            LEFT JOIN "GroupConversations" g ON g."ConversationId" = c."Id"
+            WHERE (c."Kind" = 'Group' AND (
+                g."ConversationId" IS NULL OR
+                (g."DeletedAt" IS NULL AND (
+                    SELECT count(*) FROM "ConversationMembers" cm
+                    WHERE cm."ConversationId" = c."Id"
+                      AND cm."Role" = 'Admin' AND cm."LeftAt" IS NULL
+                ) <> 1)))
+               OR (c."Kind" <> 'Group' AND g."ConversationId" IS NOT NULL)
+        ) THEN
+            RAISE EXCEPTION 'Existing group conversations violate metadata/admin constraints'
+                USING ERRCODE = '23514', CONSTRAINT = 'CK_GroupConversations_OneActiveAdmin';
+        END IF;
+    END;
+    $BODY$;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20261109173241_RepairGroupAdminConstraints') THEN
+    INSERT INTO "__EFMigrationsHistory" ("MigrationId", "ProductVersion")
+    VALUES ('20261109173241_RepairGroupAdminConstraints', '10.0.14');
+    END IF;
+END $EF$;
+COMMIT;
+
+START TRANSACTION;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20261118171256_Sprint3FilesProfilesNotifications') THEN
+    ALTER TABLE "Users" ADD "AvatarFileId" uuid;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20261118171256_Sprint3FilesProfilesNotifications') THEN
+    ALTER TABLE "Users" ADD "Bio" character varying(200) NOT NULL DEFAULT '';
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20261118171256_Sprint3FilesProfilesNotifications') THEN
+    CREATE TABLE "ConversationNotificationSettings" (
+        "ConversationId" uuid NOT NULL,
+        "UserId" uuid NOT NULL,
+        "IsMuted" boolean NOT NULL DEFAULT FALSE,
+        CONSTRAINT "PK_ConversationNotificationSettings" PRIMARY KEY ("ConversationId", "UserId"),
+        CONSTRAINT "FK_ConversationNotificationSettings_ConversationMembers_Conver~" FOREIGN KEY ("ConversationId", "UserId") REFERENCES "ConversationMembers" ("ConversationId", "UserId") ON DELETE CASCADE
+    );
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20261118171256_Sprint3FilesProfilesNotifications') THEN
+    CREATE TABLE "StoredFiles" (
+        "Id" uuid NOT NULL,
+        "UploadedByUserId" uuid NOT NULL,
+        "ConversationId" uuid,
+        "UsageType" character varying(20) NOT NULL,
+        "Status" character varying(20) NOT NULL,
+        "StorageKey" character varying(512) NOT NULL,
+        "FileName" character varying(255) NOT NULL,
+        "ContentType" character varying(255) NOT NULL,
+        "SizeBytes" bigint NOT NULL,
+        "CreatedAt" timestamp with time zone NOT NULL,
+        CONSTRAINT "PK_StoredFiles" PRIMARY KEY ("Id"),
+        CONSTRAINT "CK_StoredFiles_ContentTypeNonEmpty" CHECK (length(btrim("ContentType")) > 0),
+        CONSTRAINT "CK_StoredFiles_FileNameNonEmpty" CHECK (length(btrim("FileName")) > 0),
+        CONSTRAINT "CK_StoredFiles_SizePositive" CHECK ("SizeBytes" > 0),
+        CONSTRAINT "CK_StoredFiles_StorageKeyNonEmpty" CHECK (length(btrim("StorageKey")) > 0),
+        CONSTRAINT "CK_StoredFiles_UsageStatusAndSize" CHECK (("UsageType" = 'Avatar' AND "ConversationId" IS NULL
+        AND "Status" IN ('Pending', 'Active', 'Inactive')
+        AND "SizeBytes" <= 2097152)
+    OR
+    ("UsageType" = 'Attachment' AND "ConversationId" IS NOT NULL
+        AND "Status" IN ('Pending', 'Attached')
+        AND "SizeBytes" <= 10485760)),
+        CONSTRAINT "FK_StoredFiles_Conversations_ConversationId" FOREIGN KEY ("ConversationId") REFERENCES "Conversations" ("Id") ON DELETE RESTRICT,
+        CONSTRAINT "FK_StoredFiles_Users_UploadedByUserId" FOREIGN KEY ("UploadedByUserId") REFERENCES "Users" ("Id") ON DELETE RESTRICT
+    );
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20261118171256_Sprint3FilesProfilesNotifications') THEN
+    CREATE TABLE "MessageAttachments" (
+        "MessageId" uuid NOT NULL,
+        "StoredFileId" uuid NOT NULL,
+        CONSTRAINT "PK_MessageAttachments" PRIMARY KEY ("MessageId", "StoredFileId"),
+        CONSTRAINT "FK_MessageAttachments_Messages_MessageId" FOREIGN KEY ("MessageId") REFERENCES "Messages" ("Id") ON DELETE RESTRICT,
+        CONSTRAINT "FK_MessageAttachments_StoredFiles_StoredFileId" FOREIGN KEY ("StoredFileId") REFERENCES "StoredFiles" ("Id") ON DELETE RESTRICT
+    );
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20261118171256_Sprint3FilesProfilesNotifications') THEN
+    CREATE UNIQUE INDEX "IX_Users_AvatarFileId" ON "Users" ("AvatarFileId");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20261118171256_Sprint3FilesProfilesNotifications') THEN
+    CREATE INDEX "IX_ConversationNotificationSettings_UserId" ON "ConversationNotificationSettings" ("UserId");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20261118171256_Sprint3FilesProfilesNotifications') THEN
+    CREATE UNIQUE INDEX "IX_MessageAttachments_StoredFileId" ON "MessageAttachments" ("StoredFileId");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20261118171256_Sprint3FilesProfilesNotifications') THEN
+    CREATE INDEX "IX_StoredFiles_ConversationId" ON "StoredFiles" ("ConversationId");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20261118171256_Sprint3FilesProfilesNotifications') THEN
+    CREATE INDEX "IX_StoredFiles_Status_CreatedAt" ON "StoredFiles" ("Status", "CreatedAt");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20261118171256_Sprint3FilesProfilesNotifications') THEN
+    CREATE UNIQUE INDEX "IX_StoredFiles_StorageKey" ON "StoredFiles" ("StorageKey");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20261118171256_Sprint3FilesProfilesNotifications') THEN
+    CREATE INDEX "IX_StoredFiles_UploadedByUserId" ON "StoredFiles" ("UploadedByUserId");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20261118171256_Sprint3FilesProfilesNotifications') THEN
+    ALTER TABLE "Users" ADD CONSTRAINT "FK_Users_StoredFiles_AvatarFileId" FOREIGN KEY ("AvatarFileId") REFERENCES "StoredFiles" ("Id") ON DELETE RESTRICT;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20261118171256_Sprint3FilesProfilesNotifications') THEN
+    CREATE FUNCTION chat_s3_validate_avatar() RETURNS trigger AS $$
+    BEGIN
+        IF NEW."AvatarFileId" IS NOT NULL AND NOT EXISTS (
+            SELECT 1 FROM "StoredFiles" f
+            WHERE f."Id" = NEW."AvatarFileId"
+              AND f."UploadedByUserId" = NEW."Id"
+              AND f."UsageType" = 'Avatar'
+              AND f."Status" = 'Active'
+        ) THEN
+            RAISE EXCEPTION 'Avatar must be an active file uploaded by its owner'
+                USING ERRCODE = '23514';
+        END IF;
+        RETURN NULL;
+    END;
+    $$ LANGUAGE plpgsql;
+
+    CREATE CONSTRAINT TRIGGER "TR_Users_ValidAvatar"
+    AFTER INSERT OR UPDATE ON "Users"
+    DEFERRABLE INITIALLY DEFERRED
+    FOR EACH ROW EXECUTE FUNCTION chat_s3_validate_avatar();
+
+    CREATE FUNCTION chat_s3_validate_file_links() RETURNS trigger AS $$
+    DECLARE file_id uuid;
+    BEGIN
+        file_id := NEW."Id";
+        IF NOT EXISTS (SELECT 1 FROM "StoredFiles" WHERE "Id" = file_id) THEN
+            RETURN NULL;
+        END IF;
+
+        IF EXISTS (
+            SELECT 1 FROM "Users" u JOIN "StoredFiles" f ON f."Id" = u."AvatarFileId"
+            WHERE f."Id" = file_id AND (f."UploadedByUserId" <> u."Id"
+                OR f."UsageType" <> 'Avatar' OR f."Status" <> 'Active')
+        ) OR EXISTS (
+            SELECT 1 FROM "MessageAttachments" a
+            JOIN "Messages" m ON m."Id" = a."MessageId"
+            JOIN "StoredFiles" f ON f."Id" = a."StoredFileId"
+            WHERE f."Id" = file_id AND (f."ConversationId" <> m."ConversationId"
+                OR f."UploadedByUserId" <> m."SenderUserId"
+                OR f."UsageType" <> 'Attachment' OR f."Status" <> 'Attached')
+        ) OR EXISTS (
+            SELECT 1 FROM "StoredFiles" f WHERE f."Id" = file_id
+              AND f."Status" = 'Attached'
+              AND NOT EXISTS (SELECT 1 FROM "MessageAttachments" a WHERE a."StoredFileId" = f."Id")
+        ) THEN
+            RAISE EXCEPTION 'Stored file has an invalid avatar or message link'
+                USING ERRCODE = '23514';
+        END IF;
+        RETURN NULL;
+    END;
+    $$ LANGUAGE plpgsql;
+
+    CREATE CONSTRAINT TRIGGER "TR_StoredFiles_ValidLinks"
+    AFTER INSERT OR UPDATE ON "StoredFiles"
+    DEFERRABLE INITIALLY DEFERRED
+    FOR EACH ROW EXECUTE FUNCTION chat_s3_validate_file_links();
+
+    CREATE FUNCTION chat_s3_validate_message_attachment() RETURNS trigger AS $$
+    DECLARE link_id uuid;
+    BEGIN
+        IF TG_OP = 'DELETE' THEN
+            link_id := OLD."StoredFileId";
+        ELSE
+            link_id := NEW."StoredFileId";
+        END IF;
+
+        -- Serialize concurrent attachments to the same message before counting.
+        PERFORM 1 FROM "Messages" m
+        JOIN "MessageAttachments" a ON a."MessageId" = m."Id"
+        WHERE a."StoredFileId" = link_id
+        FOR UPDATE OF m;
+
+        IF EXISTS (
+            SELECT 1 FROM "MessageAttachments" a
+            JOIN "Messages" m ON m."Id" = a."MessageId"
+            JOIN "StoredFiles" f ON f."Id" = a."StoredFileId"
+            WHERE a."StoredFileId" = link_id
+              AND (f."ConversationId" <> m."ConversationId"
+                OR f."UploadedByUserId" <> m."SenderUserId"
+                OR f."UsageType" <> 'Attachment' OR f."Status" <> 'Attached')
+        ) OR EXISTS (
+            SELECT 1 FROM "MessageAttachments" a
+            WHERE a."StoredFileId" = link_id
+              AND (SELECT count(*) FROM "MessageAttachments" a2 WHERE a2."MessageId" = a."MessageId") > 5
+        ) OR EXISTS (
+            SELECT 1 FROM "StoredFiles" f WHERE f."Id" = link_id
+              AND f."Status" = 'Attached'
+              AND NOT EXISTS (SELECT 1 FROM "MessageAttachments" a WHERE a."StoredFileId" = f."Id")
+        ) THEN
+            RAISE EXCEPTION 'Invalid message attachment or more than five files on a message'
+                USING ERRCODE = '23514';
+        END IF;
+
+        -- Updating the link must not leave the previously attached file orphaned.
+        IF TG_OP = 'UPDATE' THEN
+            IF OLD."StoredFileId" IS DISTINCT FROM NEW."StoredFileId" AND EXISTS (
+                SELECT 1 FROM "StoredFiles" f
+                WHERE f."Id" = OLD."StoredFileId"
+                  AND f."Status" = 'Attached'
+                  AND NOT EXISTS (
+                      SELECT 1 FROM "MessageAttachments" a
+                      WHERE a."StoredFileId" = f."Id")
+            ) THEN
+                RAISE EXCEPTION 'Previous attached file has no message link'
+                    USING ERRCODE = '23514';
+            END IF;
+        END IF;
+        RETURN NULL;
+    END;
+    $$ LANGUAGE plpgsql;
+
+    CREATE CONSTRAINT TRIGGER "TR_MessageAttachments_ValidLink"
+    AFTER INSERT OR UPDATE OR DELETE ON "MessageAttachments"
+    DEFERRABLE INITIALLY DEFERRED
+    FOR EACH ROW EXECUTE FUNCTION chat_s3_validate_message_attachment();
+
+    CREATE FUNCTION chat_s3_prevent_message_owner_change() RETURNS trigger AS $$
+    BEGIN
+        IF NEW."SenderUserId" IS DISTINCT FROM OLD."SenderUserId"
+           OR NEW."ConversationId" IS DISTINCT FROM OLD."ConversationId" THEN
+            RAISE EXCEPTION 'Message sender and conversation are immutable'
+                USING ERRCODE = '23514';
+        END IF;
+        RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+
+    CREATE TRIGGER "TR_Messages_ImmutableOwner"
+    BEFORE UPDATE OF "SenderUserId", "ConversationId" ON "Messages"
+    FOR EACH ROW EXECUTE FUNCTION chat_s3_prevent_message_owner_change();
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20261118171256_Sprint3FilesProfilesNotifications') THEN
+    INSERT INTO "__EFMigrationsHistory" ("MigrationId", "ProductVersion")
+    VALUES ('20261118171256_Sprint3FilesProfilesNotifications', '10.0.14');
+    END IF;
+END $EF$;
+COMMIT;
+
+START TRANSACTION;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20261121153000_AddMessageUserReceipts') THEN
+    CREATE TABLE "MessageUserReceipts" (
+        "MessageId" uuid NOT NULL,
+        "UserId" uuid NOT NULL,
+        "DeliveredAt" timestamp with time zone,
+        "ReadAt" timestamp with time zone,
+        CONSTRAINT "PK_MessageUserReceipts" PRIMARY KEY ("MessageId", "UserId"),
+        CONSTRAINT "CK_MessageUserReceipts_ReadRequiresDelivered" CHECK ("ReadAt" IS NULL OR "DeliveredAt" IS NOT NULL),
+        CONSTRAINT "FK_MessageUserReceipts_Messages_MessageId" FOREIGN KEY ("MessageId") REFERENCES "Messages" ("Id") ON DELETE CASCADE,
+        CONSTRAINT "FK_MessageUserReceipts_Users_UserId" FOREIGN KEY ("UserId") REFERENCES "Users" ("Id") ON DELETE RESTRICT
+    );
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20261121153000_AddMessageUserReceipts') THEN
+    CREATE INDEX "IX_MessageUserReceipts_UserId" ON "MessageUserReceipts" ("UserId");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20261121153000_AddMessageUserReceipts') THEN
+    INSERT INTO "__EFMigrationsHistory" ("MigrationId", "ProductVersion")
+    VALUES ('20261121153000_AddMessageUserReceipts', '10.0.14');
+    END IF;
+END $EF$;
+COMMIT;
+
+START TRANSACTION;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20261128163132_AddPinnedMessages') THEN
+    ALTER TABLE "Messages" ADD CONSTRAINT "AK_Messages_ConversationId_Id" UNIQUE ("ConversationId", "Id");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20261128163132_AddPinnedMessages') THEN
+    CREATE TABLE "PinnedMessages" (
+        "ConversationId" uuid NOT NULL,
+        "MessageId" uuid NOT NULL,
+        "PinnedAt" timestamp with time zone NOT NULL,
+        CONSTRAINT "PK_PinnedMessages" PRIMARY KEY ("ConversationId", "MessageId"),
+        CONSTRAINT "FK_PinnedMessages_Messages_ConversationId_MessageId" FOREIGN KEY ("ConversationId", "MessageId") REFERENCES "Messages" ("ConversationId", "Id") ON DELETE CASCADE
+    );
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20261128163132_AddPinnedMessages') THEN
+    INSERT INTO "__EFMigrationsHistory" ("MigrationId", "ProductVersion")
+    VALUES ('20261128163132_AddPinnedMessages', '10.0.14');
+    END IF;
+END $EF$;
+COMMIT;

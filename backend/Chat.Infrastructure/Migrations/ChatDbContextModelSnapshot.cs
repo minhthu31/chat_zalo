@@ -347,6 +347,22 @@ namespace Chat.Infrastructure.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Chat.Domain.Entities.PinnedMessage", b =>
+                {
+                    b.Property<Guid>("ConversationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("MessageId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("PinnedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("ConversationId", "MessageId");
+
+                    b.ToTable("PinnedMessages", (string)null);
+                });
+
             modelBuilder.Entity("Chat.Domain.Entities.StoredFile", b =>
                 {
                     b.Property<Guid>("Id")
@@ -815,6 +831,16 @@ namespace Chat.Infrastructure.Migrations
                         .WithMany()
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Chat.Domain.Entities.PinnedMessage", b =>
+                {
+                    b.HasOne("Chat.Domain.Entities.Message", null)
+                        .WithMany()
+                        .HasForeignKey("ConversationId", "MessageId")
+                        .HasPrincipalKey("ConversationId", "Id")
+                        .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });
 
