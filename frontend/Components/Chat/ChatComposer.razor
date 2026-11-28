@@ -5,7 +5,7 @@
 @inject IJSRuntime JS
 <form class="composer" @onsubmit="() => OnSend.InvokeAsync()" @onsubmit:preventDefault>
     <label for="chat-body">Tin nhắn</label>
-    <textarea id="chat-body" value="@Body" @oninput="UpdateBody" maxlength="4000" rows="3"
+    <textarea id="chat-body" @ref="_textarea" value="@Body" @oninput="UpdateBody" maxlength="4000" rows="3"
               disabled="@(Disabled || Retry)" placeholder="Nhập tin nhắn…"></textarea>
 
     @if (Files.Count > 0)
@@ -55,6 +55,15 @@
 
     private string? _fileError;
     private InputFile? _input;
+    private ElementReference _textarea;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        _module ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/chat-composer.js");
+        await _module.InvokeVoidAsync("enableEnterToSend", _textarea);
+    }
 
     private Task UpdateBody(ChangeEventArgs e) => BodyChanged.InvokeAsync(e.Value?.ToString() ?? "");
 
@@ -100,7 +109,7 @@
         {
             if (_input?.Element is { } element)
             {
-                _module ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/files.js");
+                _module ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/chat-composer.js");
                 await _module.InvokeVoidAsync("resetInput", element);
             }
         }
