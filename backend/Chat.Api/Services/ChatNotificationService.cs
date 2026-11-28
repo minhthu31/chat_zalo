@@ -95,8 +95,9 @@ namespace chat_zalo.Services
                 activeMembers = activeMembers.Where(member => _dbContext.Messages.Any(message =>
                     message.Id == messageId && message.ConversationId == receipt.ConversationId &&
                     message.Seq >= member.JoinedSeq &&
-                    !_dbContext.UserBlocks.Any(block => block.BlockerUserId == message.SenderUserId &&
-                        block.BlockedUserId == member.UserId)));
+                    !_dbContext.UserBlocks.Any(block =>
+                        (block.BlockerUserId == message.SenderUserId && block.BlockedUserId == member.UserId) ||
+                        (block.BlockerUserId == member.UserId && block.BlockedUserId == message.SenderUserId))));
             }
 
             var activeMemberIds = await activeMembers.Select(m => m.UserId).ToListAsync(cancellationToken);
@@ -114,14 +115,14 @@ namespace chat_zalo.Services
                 {
                     // In direct chat, a recipient cannot view the conversation
                     // when the receipt owner has blocked that recipient.
-                    var blockedByReceiptOwner = await _dbContext.UserBlocks
+                    var blockedBetweenMembers = await _dbContext.UserBlocks
                         .AsNoTracking()
                         .AnyAsync(b =>
-                            b.BlockerUserId == receipt.UserId &&
-                            b.BlockedUserId == recipientId,
+                            (b.BlockerUserId == receipt.UserId && b.BlockedUserId == recipientId) ||
+                            (b.BlockerUserId == recipientId && b.BlockedUserId == receipt.UserId),
                             cancellationToken);
 
-                    if (blockedByReceiptOwner)
+                    if (blockedBetweenMembers)
                         continue;
                 }
                 else

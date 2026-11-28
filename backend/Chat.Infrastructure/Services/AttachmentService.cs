@@ -76,8 +76,10 @@ public sealed class AttachmentService(ChatDbContext db, IFileStorage storage,
                 .Where(a => a.StoredFileId == attachmentId).Select(a => a.Message).SingleOrDefaultAsync(cancellationToken);
             if (message is null) throw Missing();
             if (message.ConversationId != conversationId || message.Seq < member.JoinedSeq) throw Denied();
-            if (member.IsGroup && await db.UserBlocks.AnyAsync(b => b.BlockerUserId == message.SenderUserId
-                && b.BlockedUserId == currentUserId, cancellationToken)) throw Denied();
+            if (member.IsGroup && await db.UserBlocks.AnyAsync(b =>
+                (b.BlockerUserId == message.SenderUserId && b.BlockedUserId == currentUserId) ||
+                (b.BlockerUserId == currentUserId && b.BlockedUserId == message.SenderUserId), cancellationToken))
+                throw Denied();
         }
         else throw Missing();
         try { return new FileContentResult(await storage.OpenReadAsync(file.StorageKey, cancellationToken), file.ContentType, file.FileName); }

@@ -61,8 +61,8 @@ public sealed class MessageReceiptService : IMessageReceiptService
         if (conversation.Kind == "Group")
         {
             members = members.Where(m => !_db.UserBlocks.Any(b =>
-                b.BlockerUserId == m.UserId &&
-                b.BlockedUserId == currentUserId));
+                (b.BlockerUserId == m.UserId && b.BlockedUserId == currentUserId) ||
+                (b.BlockerUserId == currentUserId && b.BlockedUserId == m.UserId)));
         }
 
         var rows = await (
@@ -87,7 +87,9 @@ public sealed class MessageReceiptService : IMessageReceiptService
                 .SingleOrDefaultAsync(cancellationToken) ?? throw AccessDenied();
             var visibleMessages = _db.Messages.AsNoTracking()
                 .Where(m => m.ConversationId == conversationId && m.Seq >= joinedSeq &&
-                    !_db.UserBlocks.Any(b => b.BlockerUserId == m.SenderUserId && b.BlockedUserId == currentUserId));
+                    !_db.UserBlocks.Any(b =>
+                        (b.BlockerUserId == m.SenderUserId && b.BlockedUserId == currentUserId) ||
+                        (b.BlockerUserId == currentUserId && b.BlockedUserId == m.SenderUserId)));
             if (messageIds is not null)
                 visibleMessages = visibleMessages.Where(m => messageIds.Contains(m.Id));
 
@@ -328,8 +330,9 @@ public sealed class MessageReceiptService : IMessageReceiptService
             .SingleOrDefaultAsync(cancellationToken);
         if (message is null)
             throw InvalidSequence();
-        if (await _db.UserBlocks.AnyAsync(b => b.BlockerUserId == message.SenderUserId &&
-            b.BlockedUserId == userId, cancellationToken))
+        if (await _db.UserBlocks.AnyAsync(b =>
+            (b.BlockerUserId == message.SenderUserId && b.BlockedUserId == userId) ||
+            (b.BlockerUserId == userId && b.BlockedUserId == message.SenderUserId), cancellationToken))
             throw AccessDenied();
 
         // The conversation/member locks held by UpdateAsync serialize concurrent retries.

@@ -1,4 +1,4 @@
-﻿using System.Data;
+using System.Data;
 using Chat.Application.DTOs.Messages;
 using Chat.Application.Interfaces;
 using Chat.Application.Models.Groups;
@@ -205,14 +205,14 @@ public sealed class MessageService : IMessageService
                 m.ConversationId == conversationId &&
                 m.Seq >= member.JoinedSeq);
 
-        // CHAT-16: lọc tin nhắn của người đã chặn mình trong nhóm.
+        // CHAT-16: ẩn tin giữa hai thành viên nếu một trong hai đã chặn người còn lại.
         // Phải lọc trước OrderBy và Take để trang có đủ tin nhắn.
         if (conversation.Kind == "Group")
         {
             query = query.Where(m =>
                 !_db.UserBlocks.Any(b =>
-                    b.BlockerUserId == m.SenderUserId &&
-                    b.BlockedUserId == currentUserId));
+                    (b.BlockerUserId == m.SenderUserId && b.BlockedUserId == currentUserId) ||
+                    (b.BlockerUserId == currentUserId && b.BlockedUserId == m.SenderUserId)));
         }
 
         if (beforeSeq.HasValue)
@@ -264,8 +264,8 @@ public sealed class MessageService : IMessageService
         {
             query = query.Where(m =>
                 !_db.UserBlocks.Any(b =>
-                    b.BlockerUserId == m.SenderUserId &&
-                    b.BlockedUserId == currentUserId));
+                    (b.BlockerUserId == m.SenderUserId && b.BlockedUserId == currentUserId) ||
+                    (b.BlockerUserId == currentUserId && b.BlockedUserId == m.SenderUserId)));
         }
 
         var messages = await query
