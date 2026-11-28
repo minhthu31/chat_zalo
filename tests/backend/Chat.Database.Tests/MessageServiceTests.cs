@@ -819,6 +819,19 @@ public sealed class MessageServiceTests
 
         await using (var db = CreateContext())
         {
+            var service = CreateService(db);
+            var history = await service.GetHistoryAsync(a, conversationId, null, 20);
+            var newMessages = await service.GetNewMessagesAsync(a, conversationId, 0);
+            var thirdMemberHistory = await service.GetHistoryAsync(c, conversationId, null, 20);
+            Assert.DoesNotContain(history, m => m.SenderUserId == b);
+            Assert.DoesNotContain(newMessages, m => m.SenderUserId == b);
+            Assert.Contains(history, m => m.SenderUserId == c);
+            Assert.Contains(thirdMemberHistory, m => m.SenderUserId == a);
+            Assert.Contains(thirdMemberHistory, m => m.SenderUserId == b);
+        }
+
+        await using (var db = CreateContext())
+        {
             var members = await db.ConversationMembers
                 .AsNoTracking()
                 .Where(m => m.ConversationId == conversationId)
